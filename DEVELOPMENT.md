@@ -35,24 +35,18 @@ flutter pub get
 flutter run -d chrome --dart-define=GAME_SERVER_URL=ws://localhost:8080/game
 ```
 
-Without Firebase compile-time values, local development uses the server's insecure development identity. Never enable `ALLOW_INSECURE_AUTH` in production.
+The committed Web App configuration initializes Firebase Authentication and Analytics. The local game server accepts an insecure development identity only when `ALLOW_INSECURE_AUTH=true`; never enable it in production.
 
-## Firebase-enabled build
+## Firebase-enabled web build
 
-Obtain the Web App values from Firebase Console → Project settings → Your apps, or generate them with FlutterFire CLI.
+The registered Firebase Web App configuration is stored in `firebase_options.dart`. Only the deployed game-server URL is injected at build time.
 
 ```bash
 flutter build web \
-  --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game \
-  --dart-define=FIREBASE_API_KEY=... \
-  --dart-define=FIREBASE_APP_ID=... \
-  --dart-define=FIREBASE_MESSAGING_SENDER_ID=... \
-  --dart-define=FIREBASE_PROJECT_ID=wordrusharena \
-  --dart-define=FIREBASE_AUTH_DOMAIN=wordrusharena.firebaseapp.com \
-  --dart-define=FIREBASE_STORAGE_BUCKET=wordrusharena.firebasestorage.app
+  --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game
 ```
 
-Never commit service-account credentials. Firebase client configuration is public by design, but production values should be injected by the build pipeline so environments cannot be mixed accidentally.
+Android and iOS require their own Firebase app registrations and platform-specific options. Do not reuse the Web App ID for native builds.
 
 ## Firebase emulators and Hosting
 
@@ -67,3 +61,5 @@ Production deployment:
 ```bash
 firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project wordrusharena
 ```
+
+Never commit service-account credentials or private keys.
