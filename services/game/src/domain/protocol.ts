@@ -3,6 +3,7 @@ import { z } from "zod";
 const identity = {
   playerName: z.string().trim().min(2).max(20),
   idToken: z.string().optional(),
+  appCheckToken: z.string().optional(),
   requestId: z.string().min(1).max(64)
 };
 
