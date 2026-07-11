@@ -18,22 +18,28 @@ Players race against each other to build valid words from the same letter pool. 
 - Reconnect grace period
 - Mobile-first HUD with safe-area support
 - Low-latency tap, drag, submit, haptic, and audio feedback
+- Firebase-backed identity, player data, telemetry, messaging, and live configuration
 - Ranked matchmaking and MMR after the private-room vertical slice is stable
 
 ## Proposed stack
 
 - **Mobile:** Flutter
-- **Realtime server:** Node.js, TypeScript, Colyseus
-- **Persistence:** PostgreSQL
-- **Ephemeral state / matchmaking:** Redis
+- **Firebase:** Authentication, Firestore, App Check, Analytics, Crashlytics, Performance Monitoring, Remote Config, Cloud Messaging
+- **Realtime game server:** Node.js, TypeScript, Colyseus on Google Cloud Run
+- **Serverless workflows:** Cloud Functions for Firebase (2nd gen)
+- **Ephemeral state / scale-out:** Redis-compatible Google Cloud Memorystore when multi-instance coordination is required
 - **Shared contracts:** versioned JSON schemas and protocol documentation
+
+Firebase is the product platform, but the live match remains server-authoritative. Firestore clients never write scores, ratings, accepted words, or match results directly.
 
 ## Repository layout
 
 ```text
 apps/mobile/       Flutter client
-services/game/     Realtime game server
+services/game/     Colyseus realtime game server
+functions/         Firebase Functions for non-realtime workflows
 packages/shared/   Shared contracts and validation fixtures
+firebase/          Rules, indexes, emulator fixtures, configuration templates
 docs/              Product, UX, architecture, and delivery plans
 ```
 
@@ -45,18 +51,19 @@ docs/              Product, UX, architecture, and delivery plans
 - Gameplay stays usable around notches, Dynamic Island, cutouts, gesture bars, and keyboards
 - Rejoining players recover the authoritative room snapshot
 - No client-submitted score is trusted
+- App Check and Firebase Security Rules enforce the client trust boundary
 
 ## Delivery order
 
-1. Product rules and protocol contracts
-2. Room creation, room-code join, lobby, ready state, reconnect
-3. Core word loop and server validation
+1. Product rules, Firebase environments, and protocol contracts
+2. Anonymous Firebase Authentication, room creation, code join, lobby, ready state, reconnect
+3. Core word loop and server validation on Cloud Run
 4. Mobile HUD, safe areas, touch latency, haptics
-5. Match results, rematch, telemetry, abuse controls
-6. Ranked matchmaking, MMR, progression, cosmetics
+5. Results, Firestore persistence, telemetry, abuse controls
+6. Ranked matchmaking, MMR, progression, cosmetics, messaging
 
-See [Game Design](docs/GAME_DESIGN.md), [Architecture](docs/ARCHITECTURE.md), and [Roadmap](docs/ROADMAP.md).
+See [Game Design](docs/GAME_DESIGN.md), [Architecture](docs/ARCHITECTURE.md), [Firebase Plan](docs/FIREBASE.md), and [Roadmap](docs/ROADMAP.md).
 
 ## Status
 
-Pre-production foundation. The first implementation milestone is a playable private-room vertical slice.
+Pre-production foundation. The first implementation milestone is a playable Firebase-integrated private-room vertical slice.
