@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  firebase_analytics: ^12.4.3
   firebase_auth: ^6.5.4
   firebase_core: ^4.11.0
   web_socket_channel: ^3.0.3
