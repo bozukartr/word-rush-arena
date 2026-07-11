@@ -8,19 +8,19 @@ Goal: remove ambiguity before UI and networking implementation diverge.
 - Define protocol messages, room state machine, errors, and reconnect semantics
 - Select initial dictionary source and licensing approach
 - Create separate Firebase development, staging, and production projects
-- Configure FlutterFire, Firebase Emulator Suite, Authentication, Firestore, App Check, Analytics, Crashlytics, Performance, Remote Config, and Cloud Messaging
+- Configure FlutterFire, Firebase Hosting, preview channels, Firebase Emulator Suite, Authentication, Firestore, App Check, Analytics, Crashlytics, Performance, Remote Config, and Cloud Messaging
 - Draft Firestore/Storage Security Rules and indexes
 - Establish Flutter and Node/TypeScript project conventions
 - Add linting, formatting, unit tests, emulator tests, and CI
 - Define device test matrix and performance instrumentation
 
-Exit: Firebase emulators run locally and protocol/scoring fixtures pass deterministically.
+Exit: Firebase emulators run locally, a Flutter Web shell deploys to a Hosting preview channel, and protocol/scoring fixtures pass deterministically.
 
 ## Phase 1 — Firebase-integrated private-room vertical slice
 
 Goal: two real devices can complete a reliable match.
 
-- Anonymous Firebase Authentication with stable UID
+- Build the Flutter client for iOS, Android, and Web/PWA from one codebase\n- Deploy the web client to a Firebase Hosting preview channel\n- Anonymous Firebase Authentication with stable UID
 - Firebase ID token and App Check verification in the game service
 - Deploy a warm development Colyseus service to Cloud Run
 - Create room and generate six-character code
@@ -35,9 +35,9 @@ Goal: two real devices can complete a reliable match.
 
 Exit: repeated 2-player matches complete without manual recovery and clients cannot forge protected Firestore data.
 
-## Phase 2 — Mobile quality and resilience
+## Phase 2 — Cross-platform quality and resilience
 
-Goal: the game feels instant and remains usable across devices and network changes.
+Goal: the game feels instant and remains usable across mobile devices, supported browsers, and network changes.
 
 - Final HUD hierarchy and responsive layout
 - Safe-area, cutout, keyboard, tablet, and text-scaling coverage
@@ -47,7 +47,7 @@ Goal: the game feels instant and remains usable across devices and network chang
 - Reconnect grace period and authoritative snapshot recovery
 - Background/foreground lifecycle handling
 - Idempotent submission and duplicate-tap protection
-- Mid-tier Android and representative iOS performance pass
+- Mid-tier Android, representative iOS, mobile Safari, and Chromium performance pass\n- Firebase Hosting cache, service-worker update, offline shell, and rollback tests
 
 Exit: device matrix and poor-network scenarios meet agreed acceptance criteria.
 
@@ -96,7 +96,7 @@ Exit: soft-launch candidate with measurable retention and fair monetization.
 
 ### P0
 
-- Firebase project separation and FlutterFire setup
+- Firebase project separation, FlutterFire setup, and Hosting targets\n- Hosting preview-channel CI and cache policy
 - Auth + App Check verification path
 - Firestore Security Rules and emulator tests
 - Room state machine and code service
