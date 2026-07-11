@@ -35,7 +35,7 @@ flutter pub get
 flutter run -d chrome --dart-define=GAME_SERVER_URL=ws://localhost:8080/game
 ```
 
-The committed Web App configuration initializes Firebase Authentication and Analytics. The local game server accepts an insecure development identity only when `ALLOW_INSECURE_AUTH=true`; never enable it in production.
+The committed Web App configuration initializes Firebase Authentication, Analytics, and App Check when `FIREBASE_APP_CHECK_SITE_KEY` is supplied. The local game server accepts an insecure development identity only when `ALLOW_INSECURE_AUTH=true`; never enable it in production.
 
 ## Firebase-enabled web build
 
@@ -43,7 +43,8 @@ The registered Firebase Web App configuration is stored in `firebase_options.dar
 
 ```bash
 flutter build web \
-  --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game
+  --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game \\
+  --dart-define=FIREBASE_APP_CHECK_SITE_KEY=YOUR_RECAPTCHA_V3_SITE_KEY
 ```
 
 Android and iOS require their own Firebase app registrations and platform-specific options. Do not reuse the Web App ID for native builds.
