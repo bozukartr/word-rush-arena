@@ -34,6 +34,47 @@ service cloud.firestore {
       }
     }
 
+    // Server-less private-room match state. Word validation and letter
+    // availability are enforced client-side only (see docs/DEPLOY.md); these
+    // rules cover what is structurally checkable without a trusted backend.
+    match /rooms/{roomCode} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.phase == 'lobby'
+        && request.resource.data.letters == [];
+      allow update: if signedIn() && (
+        (resource.data.phase == 'lobby'
+          && request.auth.uid == resource.data.hostId
+          && request.resource.data.hostId == resource.data.hostId
+          && request.resource.data.phase == 'playing')
+        || (resource.data.phase == 'playing'
+          && request.resource.data.phase == 'results'
+          && request.time >= resource.data.endsAt)
+      );
+      allow delete: if false;
+
+      match /players/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid == uid
+          && request.resource.data.score == 0
+          && request.resource.data.combo == 0;
+        allow update: if signedIn() && request.auth.uid == uid && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ready', 'connected'])
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score', 'combo'])
+            && request.resource.data.score is int
+            && request.resource.data.score >= resource.data.score)
+        );
+        allow delete: if false;
+      }
+
+      match /claimedWords/{word} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.resource.data.playerId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

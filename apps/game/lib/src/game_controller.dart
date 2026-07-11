@@ -1,26 +1,33 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:math';
 
+import 'package:characters/characters.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
-import 'firebase_bootstrap.dart';
 import 'models.dart';
+import 'word_rules.dart';
+
+const _roundDuration = Duration(seconds: 75);
+const _letterCount = 12;
+const _maxPlayers = 4;
 
 class GameController extends ChangeNotifier {
-  GameController({
-    String? endpoint,
-  }) : endpoint = endpoint ??
-            const String.fromEnvironment(
-              'GAME_SERVER_URL',
-              defaultValue: 'ws://localhost:8080/game',
-            );
+  GameController({FirebaseFirestore? firestore, FirebaseAuth? auth})
+      : _firestoreOverride = firestore,
+        _authOverride = auth;
 
-  final String endpoint;
-  WebSocketChannel? _channel;
-  StreamSubscription<dynamic>? _subscription;
+  final FirebaseFirestore? _firestoreOverride;
+  final FirebaseAuth? _authOverride;
+  FirebaseFirestore get _firestore => _firestoreOverride ?? FirebaseFirestore.instance;
+  FirebaseAuth get _auth => _authOverride ?? FirebaseAuth.instance;
+  final _random = Random();
+
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _roomSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _playersSub;
   Timer? _clock;
-  int _requestSequence = 0;
+  bool _finishing = false;
 
   GamePhase phase = GamePhase.home;
   String roomCode = '';
@@ -31,6 +38,8 @@ class GameController extends ChangeNotifier {
   List<String> letters = const [];
   List<PlayerView> players = const [];
   String? localPlayerId;
+  String? _hostId;
+  int _combo = 0;
 
   int get remainingSeconds {
     final end = endsAt;
@@ -39,66 +48,182 @@ class GameController extends ChangeNotifier {
     return milliseconds <= 0 ? 0 : (milliseconds / 1000).ceil();
   }
 
-  bool get localPlayerIsHost =>
-      players.any((player) => player.id == localPlayerId && player.isHost);
+  bool get localPlayerIsHost => _hostId != null && _hostId == localPlayerId;
   bool get canStart => players.length >= 2 && players.every((player) => player.ready);
 
-  Future<void> createRoom(String playerName) =>
-      _connectAndSend('create_room', playerName: playerName);
+  Future<String> _ensureSignedIn() async {
+    final existing = _auth.currentUser;
+    if (existing != null) return existing.uid;
+    final credential = await _auth.signInAnonymously();
+    final uid = credential.user?.uid;
+    if (uid == null) throw StateError('Oturum açılamadı');
+    return uid;
+  }
 
-  Future<void> joinRoom(String playerName, String code) => _connectAndSend(
-        'join_room',
-        playerName: playerName,
-        roomCode: code.trim().toUpperCase(),
-      );
+  CollectionReference<Map<String, dynamic>> get _rooms => _firestore.collection('rooms');
 
-  Future<void> _connectAndSend(
-    String type, {
-    required String playerName,
-    String? roomCode,
-  }) async {
+  Future<void> createRoom(String playerName) async {
     error = null;
     phase = GamePhase.connecting;
-    status = 'Sunucuya bağlanıyor…';
+    status = 'Oda kuruluyor…';
     notifyListeners();
     try {
-      await _subscription?.cancel();
-      await _channel?.sink.close();
-      final channel = WebSocketChannel.connect(Uri.parse(endpoint));
-      _channel = channel;
-      await channel.ready;
-      _subscription = channel.stream.listen(
-        _handleMessage,
-        onError: (Object value) => _fail('Bağlantı hatası: $value'),
-        onDone: () {
-          if (phase != GamePhase.home) _fail('Sunucu bağlantısı kapandı.');
-        },
-      );
-      final token = await FirebaseBootstrap.idToken();
-      final appCheckToken = await FirebaseBootstrap.appCheckToken();
-      _send({
-        'type': type,
-        'requestId': _nextRequestId(),
-        'playerName': playerName.trim(),
-        if (roomCode != null) 'roomCode': roomCode,
-        if (token != null) 'idToken': token,
-        if (appCheckToken != null) 'appCheckToken': appCheckToken,
-      });
+      final uid = await _ensureSignedIn();
+      var attempts = 0;
+      late String code;
+      while (true) {
+        code = generateRoomCode(6, randomInt: _random.nextInt);
+        final ref = _rooms.doc(code);
+        final created = await _firestore.runTransaction<bool>((tx) async {
+          final snapshot = await tx.get(ref);
+          if (snapshot.exists) return false;
+          tx.set(ref, <String, dynamic>{
+            'hostId': uid,
+            'phase': 'lobby',
+            'letters': <String>[],
+            'endsAt': null,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          tx.set(ref.collection('players').doc(uid), _newPlayer(playerName));
+          return true;
+        });
+        if (created) break;
+        attempts += 1;
+        if (attempts > 8) throw StateError('Oda kodu üretilemedi, tekrar dene.');
+      }
+      localPlayerId = uid;
+      roomCode = code;
+      _combo = 0;
+      _listenToRoom(code);
     } catch (exception) {
-      _fail('Bağlantı kurulamadı: $exception');
+      _fail('Oda kurulamadı: ${_reason(exception)}');
     }
   }
 
-  void setReady(bool value) => _send({
-        'type': 'set_ready',
-        'ready': value,
-        'requestId': _nextRequestId(),
-      });
+  Future<void> joinRoom(String playerName, String codeInput) async {
+    error = null;
+    phase = GamePhase.connecting;
+    status = 'Odaya katılıyor…';
+    notifyListeners();
+    final code = normalizeRoomCode(codeInput);
+    try {
+      final uid = await _ensureSignedIn();
+      final ref = _rooms.doc(code);
+      final roomSnapshot = await ref.get();
+      if (!roomSnapshot.exists) throw StateError('ROOM_NOT_FOUND');
+      final data = roomSnapshot.data()!;
+      if (data['phase'] != 'lobby') throw StateError('ROOM_ALREADY_STARTED');
+      final existingPlayers = await ref.collection('players').get();
+      final alreadyJoined = existingPlayers.docs.any((doc) => doc.id == uid);
+      if (!alreadyJoined && existingPlayers.docs.length >= _maxPlayers) {
+        throw StateError('ROOM_FULL');
+      }
+      await ref.collection('players').doc(uid).set(_newPlayer(playerName));
+      localPlayerId = uid;
+      roomCode = code;
+      _combo = 0;
+      _listenToRoom(code);
+    } catch (exception) {
+      _fail(_reason(exception));
+    }
+  }
 
-  void startMatch() => _send({
-        'type': 'start_match',
-        'requestId': _nextRequestId(),
-      });
+  Map<String, dynamic> _newPlayer(String name) => <String, dynamic>{
+        'name': name.trim(),
+        'ready': false,
+        'score': 0,
+        'combo': 0,
+        'connected': true,
+        'joinedAt': FieldValue.serverTimestamp(),
+      };
+
+  void _listenToRoom(String code) {
+    _roomSub?.cancel();
+    _playersSub?.cancel();
+    _roomSub = _rooms.doc(code).snapshots().listen(
+          _handleRoomSnapshot,
+          onError: (Object value) => _fail('Bağlantı hatası: $value'),
+        );
+    _playersSub = _rooms.doc(code).collection('players').orderBy('score', descending: true).snapshots().listen(
+          _handlePlayersSnapshot,
+          onError: (Object value) => _fail('Bağlantı hatası: $value'),
+        );
+  }
+
+  void _handleRoomSnapshot(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    final data = snapshot.data();
+    if (data == null) {
+      _fail('Oda kapatıldı.');
+      return;
+    }
+    _hostId = data['hostId'] as String?;
+    letters = List<String>.from(data['letters'] as List<dynamic>? ?? const []);
+    final timestamp = data['endsAt'];
+    endsAt = timestamp is Timestamp ? timestamp.toDate() : null;
+    final nextPhase = switch (data['phase']) {
+      'lobby' => GamePhase.lobby,
+      'playing' => GamePhase.playing,
+      'results' => GamePhase.results,
+      _ => GamePhase.home,
+    };
+    if (nextPhase != phase) {
+      phase = nextPhase;
+      status = switch (phase) {
+        GamePhase.lobby => 'Oyuncuların hazırlanması bekleniyor',
+        GamePhase.results => 'Tur tamamlandı',
+        _ => status,
+      };
+    }
+    if (phase == GamePhase.playing && _clock == null) {
+      _finishing = false;
+      _clock = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+    }
+    if (phase != GamePhase.playing) {
+      _clock?.cancel();
+      _clock = null;
+    }
+    notifyListeners();
+  }
+
+  void _handlePlayersSnapshot(QuerySnapshot<Map<String, dynamic>> snapshot) {
+    players = snapshot.docs
+        .map(
+          (doc) => PlayerView(
+            id: doc.id,
+            name: doc.data()['name'] as String? ?? '',
+            score: (doc.data()['score'] as num?)?.toInt() ?? 0,
+            ready: doc.data()['ready'] as bool? ?? false,
+            connected: doc.data()['connected'] as bool? ?? true,
+            isHost: doc.id == _hostId,
+          ),
+        )
+        .toList(growable: false);
+    notifyListeners();
+  }
+
+  void _tick() {
+    notifyListeners();
+    if (_finishing || remainingSeconds > 0) return;
+    _finishing = true;
+    _rooms.doc(roomCode).update(<String, dynamic>{'phase': 'results'}).catchError((Object _) {});
+  }
+
+  void setReady(bool value) {
+    final uid = localPlayerId;
+    if (uid == null) return;
+    _rooms.doc(roomCode).collection('players').doc(uid).update({'ready': value});
+  }
+
+  Future<void> startMatch() async {
+    if (!localPlayerIsHost) return _fail('Maçı yalnızca oda sahibi başlatabilir');
+    if (!canStart) return _fail(players.length < 2 ? 'En az iki oyuncu gerekli' : 'Tüm oyuncular hazır değil');
+    final generated = generateLetters(_letterCount, randomInt: _random.nextInt);
+    await _rooms.doc(roomCode).update(<String, dynamic>{
+      'phase': 'playing',
+      'letters': generated,
+      'endsAt': Timestamp.fromDate(DateTime.now().add(_roundDuration)),
+    });
+  }
 
   void selectLetter(String letter) {
     if (phase != GamePhase.playing || currentWord.length >= 24) return;
@@ -118,95 +243,72 @@ class GameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void submitWord() {
-    final word = currentWord;
-    if (word.isEmpty || phase != GamePhase.playing) return;
+  Future<void> submitWord() async {
+    final rawWord = currentWord;
+    final uid = localPlayerId;
+    if (rawWord.isEmpty || phase != GamePhase.playing || uid == null) return;
     currentWord = '';
-    status = '“$word” doğrulanıyor…';
+    status = '"$rawWord" doğrulanıyor…';
     notifyListeners();
-    _send({
-      'type': 'submit_word',
-      'word': word,
-      'requestId': _nextRequestId(),
-    });
+
+    final word = normalizeTurkishWord(rawWord);
+    if (word.characters.length < 2) return _reject('WORD_TOO_SHORT');
+    if (!canBuildWord(word, letters)) return _reject('LETTERS_NOT_AVAILABLE');
+    if (!developmentDictionary.contains(word)) return _reject('WORD_NOT_FOUND');
+    if (remainingSeconds <= 0) return _reject('MATCH_NOT_ACTIVE');
+
+    final points = scoreWord(word, _combo);
+    final roomRef = _rooms.doc(roomCode);
+    final claimRef = roomRef.collection('claimedWords').doc(word);
+    final playerRef = roomRef.collection('players').doc(uid);
+    try {
+      await _firestore.runTransaction<void>((tx) async {
+        final claimSnapshot = await tx.get(claimRef);
+        if (claimSnapshot.exists) throw StateError('WORD_ALREADY_CLAIMED');
+        final playerSnapshot = await tx.get(playerRef);
+        final currentScore = (playerSnapshot.data()?['score'] as num?)?.toInt() ?? 0;
+        tx.set(claimRef, <String, dynamic>{
+          'playerId': uid,
+          'points': points,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        tx.update(playerRef, <String, dynamic>{'score': currentScore + points, 'combo': _combo + 1});
+      });
+      _combo += 1;
+      status = '+$points puan · $word';
+      notifyListeners();
+    } catch (exception) {
+      _reject(_reason(exception));
+    }
+  }
+
+  void _reject(String code) {
+    status = _reason(code);
+    notifyListeners();
   }
 
   void reset() {
+    final uid = localPlayerId;
+    if (uid != null && roomCode.isNotEmpty) {
+      _rooms.doc(roomCode).collection('players').doc(uid).update({'connected': false}).catchError((Object _) {});
+    }
     _clock?.cancel();
-    _subscription?.cancel();
-    _channel?.sink.close();
-    _channel = null;
+    _clock = null;
+    _finishing = false;
+    _roomSub?.cancel();
+    _playersSub?.cancel();
     phase = GamePhase.home;
     roomCode = '';
     currentWord = '';
     letters = const [];
     players = const [];
     localPlayerId = null;
+    _hostId = null;
     endsAt = null;
     error = null;
     status = 'Oda kur veya kodla katıl';
     notifyListeners();
   }
-
-  void _handleMessage(dynamic raw) {
-    final message = jsonDecode(raw as String) as Map<String, dynamic>;
-    switch (message['type']) {
-      case 'room_snapshot':
-        localPlayerId = message['youId'] as String?;
-        _applySnapshot(message['room'] as Map<String, dynamic>);
-        return;
-      case 'word_result':
-        final accepted = message['accepted'] as bool;
-        status = accepted
-            ? '+${message['points']} puan · ${message['word']}'
-            : _reason(message['reason'] as String?);
-        notifyListeners();
-        return;
-      case 'error':
-        _fail(_reason(message['code'] as String?));
-        return;
-    }
-  }
-
-  void _applySnapshot(Map<String, dynamic> room) {
-    roomCode = room['code'] as String;
-    players = (room['players'] as List<dynamic>)
-        .map((item) => PlayerView.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
-    letters = List<String>.from(room['letters'] as List<dynamic>);
-    final serverEndsAt = room['endsAt'] as num?;
-    endsAt = serverEndsAt == null
-        ? null
-        : DateTime.fromMillisecondsSinceEpoch(serverEndsAt.toInt());
-    phase = switch (room['phase']) {
-      'lobby' => GamePhase.lobby,
-      'playing' || 'countdown' => GamePhase.playing,
-      'results' => GamePhase.results,
-      _ => GamePhase.home,
-    };
-    status = switch (phase) {
-      GamePhase.lobby => 'Oyuncuların hazırlanması bekleniyor',
-      GamePhase.playing => status,
-      GamePhase.results => 'Tur tamamlandı',
-      _ => status,
-    };
-    if (phase == GamePhase.playing && _clock == null) {
-      _clock = Timer.periodic(const Duration(milliseconds: 250), (_) {
-        notifyListeners();
-      });
-    }
-    if (phase == GamePhase.results) {
-      _clock?.cancel();
-      _clock = null;
-    }
-    notifyListeners();
-  }
-
-  void _send(Map<String, dynamic> message) {
-    _channel?.sink.add(jsonEncode(message));
-  }
-
-  String _nextRequestId() => '${DateTime.now().microsecondsSinceEpoch}-${_requestSequence++}';
 
   void _fail(String message) {
     error = message;
@@ -215,26 +317,26 @@ class GameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String _reason(String? code) => switch (code) {
-        'ROOM_NOT_FOUND' => 'Oda bulunamadı',
-        'ROOM_FULL' => 'Oda dolu',
-        'ROOM_ALREADY_STARTED' => 'Maç başlamış',
-        'PLAYERS_NOT_READY' => 'Tüm oyuncular hazır değil',
-        'NOT_ENOUGH_PLAYERS' => 'En az iki oyuncu gerekli',
-        'HOST_ONLY' => 'Maçı yalnızca oda sahibi başlatabilir',
-        'WORD_TOO_SHORT' => 'Kelime çok kısa',
-        'LETTERS_NOT_AVAILABLE' => 'Bu harfler havuzda yok',
-        'WORD_NOT_FOUND' => 'Kelime sözlükte bulunamadı',
-        'WORD_ALREADY_CLAIMED' => 'Bu kelime daha önce bulundu',
-        'AUTH_REQUIRED' => 'Oturum veya App Check doğrulanamadı',
-        _ => code ?? 'Beklenmeyen hata',
-      };
+  String _reason(Object codeOrError) {
+    final code = codeOrError is StateError ? codeOrError.message : codeOrError.toString();
+    return switch (code) {
+      'ROOM_NOT_FOUND' => 'Oda bulunamadı',
+      'ROOM_FULL' => 'Oda dolu',
+      'ROOM_ALREADY_STARTED' => 'Maç başlamış',
+      'WORD_TOO_SHORT' => 'Kelime çok kısa',
+      'LETTERS_NOT_AVAILABLE' => 'Bu harfler havuzda yok',
+      'WORD_NOT_FOUND' => 'Kelime sözlükte bulunamadı',
+      'WORD_ALREADY_CLAIMED' => 'Bu kelime daha önce bulundu',
+      'MATCH_NOT_ACTIVE' => 'Maç aktif değil',
+      _ => code.contains('permission-denied') ? 'Bu kelime daha önce bulundu' : code,
+    };
+  }
 
   @override
   void dispose() {
     _clock?.cancel();
-    _subscription?.cancel();
-    _channel?.sink.close();
+    _roomSub?.cancel();
+    _playersSub?.cancel();
     super.dispose();
   }
 }

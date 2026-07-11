@@ -5,6 +5,10 @@ import 'src/firebase_bootstrap.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await FirebaseBootstrap.initialize();
+  try {
+    await FirebaseBootstrap.initialize();
+  } catch (error, stackTrace) {
+    debugPrint('Firebase bootstrap failed, continuing without it: $error\n$stackTrace');
+  }
   runApp(const WordRushApp());
 }

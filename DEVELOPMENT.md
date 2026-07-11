@@ -2,22 +2,18 @@
 
 Firebase project: `wordrusharena`
 
+The current vertical slice runs entirely on Firebase's free Spark plan:
+Firestore holds room/lobby/match state and the Flutter client reads/writes it
+directly (see `firebase/firestore.rules`). There is no separate game server to
+run — `services/game` is an earlier Cloud Run-based design kept for reference
+if the project later needs fully trusted server-side word validation; it is
+not part of the current build or deploy path.
+
 ## Prerequisites
 
 - Flutter stable
-- Node.js 22+
 - Firebase CLI
 - Access to the `wordrusharena` Firebase project
-
-## Game server
-
-```bash
-cd services/game
-npm install
-ALLOW_INSECURE_AUTH=true npm run dev
-```
-
-Health check: `http://localhost:8080/healthz`
 
 ## Flutter web client
 
@@ -28,39 +24,42 @@ cd apps/game
 flutter create . --platforms=android,ios,web --project-name word_rush_arena
 ```
 
-Run the web client against the local game server:
+Run against the real `wordrusharena` Firebase project (Firestore/Auth are
+live, so use this for real play, not automated tests):
 
 ```bash
 flutter pub get
-flutter run -d chrome --dart-define=GAME_SERVER_URL=ws://localhost:8080/game
+flutter run -d chrome
 ```
 
-The committed Web App configuration initializes Firebase Authentication, Analytics, and App Check when `FIREBASE_APP_CHECK_SITE_KEY` is supplied. The local game server accepts an insecure development identity only when `ALLOW_INSECURE_AUTH=true`; never enable it in production.
+Anonymous Authentication must be enabled once in the Firebase Console
+(**Authentication → Sign-in method → Anonymous**), otherwise players can't
+sign in to create or join a room.
 
-## Firebase-enabled web build
-
-The registered Firebase Web App configuration is stored in `firebase_options.dart`. Only the deployed game-server URL is injected at build time.
-
-```bash
-flutter build web \
-  --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game \\
-  --dart-define=FIREBASE_APP_CHECK_SITE_KEY=YOUR_RECAPTCHA_V3_SITE_KEY
-```
-
-Android and iOS require their own Firebase app registrations and platform-specific options. Do not reuse the Web App ID for native builds.
-
-## Firebase emulators and Hosting
+## Firebase emulators (offline development)
 
 ```bash
-firebase use wordrusharena
 firebase emulators:start
-firebase hosting:channel:deploy preview --project wordrusharena
 ```
 
-Production deployment:
+Point the client at the emulators for local-only testing by adding this near
+the top of `main()` in `apps/game/lib/main.dart` (temporarily, for local runs
+only — do not commit it):
+
+```dart
+FirebaseFirestore.instance.useFirestoreEmulator('localhost', 8081);
+await FirebaseAuth.instance.useAuthEmulator('localhost', 9099);
+```
+
+## Deploying
 
 ```bash
-firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project wordrusharena
+flutter build web --release
+firebase deploy --only hosting,firestore:rules,firestore:indexes --project wordrusharena
 ```
+
+See `docs/DEPLOY.md` for the full first-time walkthrough. `FIREBASE_APP_CHECK_SITE_KEY`
+is optional for now — App Check isn't enforced on Firestore yet, and a missing
+key no longer crashes the app (bootstrap failures are caught and logged).
 
 Never commit service-account credentials or private keys.
