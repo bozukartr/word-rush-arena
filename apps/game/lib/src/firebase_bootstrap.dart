@@ -6,9 +6,18 @@ class FirebaseBootstrap {
   static const _appId = String.fromEnvironment('FIREBASE_APP_ID');
   static const _messagingSenderId =
       String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
-  static const _projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
-  static const _authDomain = String.fromEnvironment('FIREBASE_AUTH_DOMAIN');
-  static const _storageBucket = String.fromEnvironment('FIREBASE_STORAGE_BUCKET');
+  static const _projectId = String.fromEnvironment(
+    'FIREBASE_PROJECT_ID',
+    defaultValue: 'wordrusharena',
+  );
+  static const _authDomain = String.fromEnvironment(
+    'FIREBASE_AUTH_DOMAIN',
+    defaultValue: 'wordrusharena.firebaseapp.com',
+  );
+  static const _storageBucket = String.fromEnvironment(
+    'FIREBASE_STORAGE_BUCKET',
+    defaultValue: 'wordrusharena.firebasestorage.app',
+  );
 
   static bool get isConfigured =>
       _apiKey.isNotEmpty && _appId.isNotEmpty && _projectId.isNotEmpty;
@@ -30,6 +39,8 @@ class FirebaseBootstrap {
 
   static Future<String?> idToken() async {
     if (!isConfigured) return null;
-    final user = FirebaseAuth.instance.currentUser;\n    if (user == null) return null;\n    return user.getIdToken();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return null;
+    return user.getIdToken();
   }
 }
