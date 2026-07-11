@@ -24,8 +24,8 @@ Players race against each other to build valid words from the same letter pool. 
 
 ## Proposed stack
 
-- **Mobile:** Flutter
-- **Firebase:** Authentication, Firestore, App Check, Analytics, Crashlytics, Performance Monitoring, Remote Config, Cloud Messaging
+- **Game client:** Flutter for Web/PWA, iOS, and Android
+- **Firebase project:** `wordrusharena`\n- **Firebase:** Authentication, Firestore, App Check, Analytics, Crashlytics, Performance Monitoring, Remote Config, Cloud Messaging
 - **Realtime game server:** Node.js, TypeScript, JSON WebSocket service on Google Cloud Run
 - **Serverless workflows:** Cloud Functions for Firebase (2nd gen)
 - **Ephemeral state / scale-out:** Redis-compatible Google Cloud Memorystore when multi-instance coordination is required
