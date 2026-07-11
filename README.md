@@ -68,3 +68,10 @@ See [Game Design](docs/GAME_DESIGN.md), [Architecture](docs/ARCHITECTURE.md), [F
 ## Status
 
 Pre-production foundation. The first implementation milestone is a playable Firebase Hosting-integrated private-room vertical slice, with native mobile builds from the same Flutter codebase.
+
+The currently deployable slice runs entirely on Firebase's free Spark plan: the
+Flutter client talks to Firestore directly (see `firebase/firestore.rules`)
+instead of the `services/game` WebSocket server described above and in
+`docs/ARCHITECTURE.md`. That server design is kept for when the project needs
+fully trusted, server-authoritative word validation again — see
+`docs/DEPLOY.md` for the current deploy steps and the exact trade-offs.
