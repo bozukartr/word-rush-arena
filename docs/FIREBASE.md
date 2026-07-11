@@ -2,13 +2,13 @@
 
 ## Role of Firebase
 
-Firebase provides identity, durable product data, mobile observability, messaging, live configuration, and local emulation. It does not replace the server-authoritative WebSocket match service.
+Firebase provides web/PWA delivery, identity, durable product data, client observability, messaging, live configuration, and local emulation. It does not replace the server-authoritative WebSocket match service.
 
 ## Firebase products
 
 | Product | MVP use |
 | --- | --- |
-| Authentication | Anonymous-first player UID; later upgrade to platform or email sign-in |
+| Hosting | Flutter Web/PWA delivery, CDN, SSL, custom domains, and preview channels |\n| Authentication | Anonymous-first player UID; later upgrade to platform or email sign-in |
 | Firestore | Profiles, settings, server-written match summaries, public rank views, cosmetics |
 | App Check | Attest Flutter clients and protect Firebase/custom backend requests |
 | Crashlytics | Crash and non-fatal error diagnostics |
@@ -28,7 +28,7 @@ Use three separate Firebase projects:
 - staging
 - production
 
-Never reuse production credentials, Firestore, analytics, or notification targets in development. Commit only generated non-secret Firebase client configuration that is safe for mobile distribution; keep service-account credentials and server secrets outside Git.
+Use a dedicated Hosting site and preview channels per environment. Never reuse production credentials, Firestore, analytics, Hosting targets, or notification targets in development. Commit only generated non-secret Firebase client configuration that is safe for mobile distribution; keep service-account credentials and server secrets outside Git.
 
 ## Initial Firestore model
 
@@ -80,7 +80,7 @@ Enforce App Check gradually:
 
 App Check raises the cost of abuse but does not replace server validation or rate limiting.
 
-## Cloud Run game service
+## Firebase Hosting\n\nFirebase Hosting deploys the Flutter web build from `apps/game/build/web`. Recommended behavior:\n\n- rewrite SPA routes to `/index.html`\n- cache fingerprinted assets as public and immutable\n- keep `index.html`, service-worker metadata, and bootstrap files on short/no cache\n- use preview channels for pull requests and acceptance testing\n- configure separate development, staging, and production Hosting targets\n- attach the production custom domain only after staging acceptance\n- route ordinary HTTPS endpoints to Functions/Cloud Run only when useful\n- connect realtime play directly to the Cloud Run `wss://` endpoint\n\nFirebase Hosting does not distribute native iOS/Android binaries and does not replace the WebSocket game process.\n\n## Cloud Run game service
 
 Colyseus runs as a dedicated Cloud Run service with WebSocket support. Configure:
 
@@ -116,4 +116,4 @@ Do not log submitted word text, room codes, tokens, or other sensitive payloads 
 - Avoid using Firestore as a high-frequency game-state bus.
 - Sample verbose telemetry.
 - Apply retention policies to logs and temporary data.
-- Load-test Cloud Run concurrency and minimum instances before soft launch.
+- Load-test Cloud Run concurrency and minimum instances before soft launch.\n- Set deliberate Hosting cache headers to avoid stale Flutter app shells.
