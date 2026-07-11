@@ -1,22 +1,28 @@
 # Roadmap
 
-## Phase 0 — Decisions and contracts
+## Phase 0 — Decisions, Firebase foundation, and contracts
 
 Goal: remove ambiguity before UI and networking implementation diverge.
 
 - Lock round duration, duplicate rule, scoring curve, and Turkish normalization
 - Define protocol messages, room state machine, errors, and reconnect semantics
 - Select initial dictionary source and licensing approach
+- Create separate Firebase development, staging, and production projects
+- Configure FlutterFire, Firebase Emulator Suite, Authentication, Firestore, App Check, Analytics, Crashlytics, Performance, Remote Config, and Cloud Messaging
+- Draft Firestore/Storage Security Rules and indexes
 - Establish Flutter and Node/TypeScript project conventions
-- Add linting, formatting, unit tests, and CI
+- Add linting, formatting, unit tests, emulator tests, and CI
 - Define device test matrix and performance instrumentation
 
-Exit: protocol and scoring fixtures can be tested deterministically.
+Exit: Firebase emulators run locally and protocol/scoring fixtures pass deterministically.
 
-## Phase 1 — Private-room vertical slice
+## Phase 1 — Firebase-integrated private-room vertical slice
 
 Goal: two real devices can complete a reliable match.
 
+- Anonymous Firebase Authentication with stable UID
+- Firebase ID token and App Check verification in the game service
+- Deploy a warm development Colyseus service to Cloud Run
 - Create room and generate six-character code
 - Join by code
 - Lobby roster, host, ready state, leave, kick, and room-full handling
@@ -24,9 +30,10 @@ Goal: two real devices can complete a reliable match.
 - Shared letter pool
 - Tap/drag selection and word submission
 - Server validation, scoring, and result screen
+- Server-written Firestore match summary
 - Rematch and return-to-lobby
 
-Exit: repeated 2-player matches complete without manual recovery.
+Exit: repeated 2-player matches complete without manual recovery and clients cannot forge protected Firestore data.
 
 ## Phase 2 — Mobile quality and resilience
 
@@ -35,7 +42,8 @@ Goal: the game feels instant and remains usable across devices and network chang
 - Final HUD hierarchy and responsive layout
 - Safe-area, cutout, keyboard, tablet, and text-scaling coverage
 - Haptics, audio, reduced motion, and accessibility states
-- Frame-time and touch-latency instrumentation
+- Firebase Crashlytics and Performance instrumentation
+- Frame-time and touch-latency telemetry
 - Reconnect grace period and authoritative snapshot recovery
 - Background/foreground lifecycle handling
 - Idempotent submission and duplicate-tap protection
@@ -45,23 +53,28 @@ Exit: device matrix and poor-network scenarios meet agreed acceptance criteria.
 
 ## Phase 3 — Backend durability and abuse controls
 
-- PostgreSQL match summaries and player identity
-- Redis room lookup, presence, rate limits, and distributed coordination
+- Firestore player profiles, match summaries, progression, and moderation documents
+- Security Rules and emulator test coverage
+- Cloud Functions for scheduled maintenance, notifications, and leaderboard aggregation
+- Cloud Messaging invite and social notification flows
+- Remote Config rollout flags
+- Memorystore room lookup, presence, rate limits, and distributed coordination when scaling out
 - Dictionary/scoring versioning
 - Audit event trail
 - Room-code brute-force prevention
 - Submission-rate anomaly detection
-- Crash reporting, structured logs, and dashboards
+- Structured logs, alerts, and dashboards
 
-Exit: staged environment can be operated and investigated safely.
+Exit: staged Firebase/Google Cloud environment can be operated and investigated safely.
 
 ## Phase 4 — Competitive systems
 
 - Quick match
-- MMR/ELO calibration
+- MMR/ELO calibration with trusted server writes
 - Ranked seasons and leagues
 - Placement matches
 - Disconnect and abandonment policy
+- Firestore-backed public leaderboard views
 - Leaderboards with anti-abuse review
 - Daily competition and friend invites
 
@@ -72,9 +85,10 @@ Exit: matchmaking produces fair games with explainable rating changes.
 - Cosmetic profile, tiles, trails, emotes, and result celebrations
 - Daily/weekly missions
 - Non-pay-to-win progression
-- Live configuration and experiments
-- Consent-aware analytics
-- Store readiness, localization, privacy, and moderation workflows
+- Remote Config experiments and staged rollouts
+- Consent-aware Firebase Analytics
+- FCM retention and event messaging
+- Store readiness, localization, privacy, account deletion, and moderation workflows
 
 Exit: soft-launch candidate with measurable retention and fair monetization.
 
@@ -82,6 +96,9 @@ Exit: soft-launch candidate with measurable retention and fair monetization.
 
 ### P0
 
+- Firebase project separation and FlutterFire setup
+- Auth + App Check verification path
+- Firestore Security Rules and emulator tests
 - Room state machine and code service
 - Turkish Unicode normalization tests
 - Server-authoritative timer, validation, and scoring
@@ -91,10 +108,11 @@ Exit: soft-launch candidate with measurable retention and fair monetization.
 
 ### P1
 
-- Results, rematch, telemetry, accessibility
-- Redis/PostgreSQL integration
+- Results, Firestore summaries, Crashlytics, Performance, accessibility
+- Cloud Functions and Cloud Messaging
+- Memorystore integration for scale-out
 - Abuse controls and operational dashboards
 
 ### P2
 
-- Ranked matchmaking, progression, cosmetics, events
+- Ranked matchmaking, progression, cosmetics, experiments, events
