@@ -75,12 +75,14 @@ class GameController extends ChangeNotifier {
         },
       );
       final token = await FirebaseBootstrap.idToken();
+      final appCheckToken = await FirebaseBootstrap.appCheckToken();
       _send({
         'type': type,
         'requestId': _nextRequestId(),
         'playerName': playerName.trim(),
         if (roomCode != null) 'roomCode': roomCode,
         if (token != null) 'idToken': token,
+        if (appCheckToken != null) 'appCheckToken': appCheckToken,
       });
     } catch (exception) {
       _fail('Bağlantı kurulamadı: $exception');
@@ -224,7 +226,7 @@ class GameController extends ChangeNotifier {
         'LETTERS_NOT_AVAILABLE' => 'Bu harfler havuzda yok',
         'WORD_NOT_FOUND' => 'Kelime sözlükte bulunamadı',
         'WORD_ALREADY_CLAIMED' => 'Bu kelime daha önce bulundu',
-        'AUTH_REQUIRED' => 'Oturum doğrulanamadı',
+        'AUTH_REQUIRED' => 'Oturum veya App Check doğrulanamadı',
         _ => code ?? 'Beklenmeyen hata',
       };
 
