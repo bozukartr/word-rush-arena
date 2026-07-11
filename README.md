@@ -1,6 +1,6 @@
 # Word Rush Arena
 
-Competitive, hyper-casual multiplayer word puzzle designed for fast mobile sessions.
+Competitive, hyper-casual multiplayer word puzzle designed for fast mobile and web sessions.
 
 ## Product vision
 
@@ -18,7 +18,7 @@ Players race against each other to build valid words from the same letter pool. 
 - Reconnect grace period
 - Mobile-first HUD with safe-area support
 - Low-latency tap, drag, submit, haptic, and audio feedback
-- Firebase-backed identity, player data, telemetry, messaging, and live configuration
+- Flutter Web/PWA delivery through Firebase Hosting\n- Firebase-backed identity, player data, telemetry, messaging, and live configuration
 - Ranked matchmaking and MMR after the private-room vertical slice is stable
 
 ## Proposed stack
@@ -35,11 +35,11 @@ Firebase is the product platform, but the live match remains server-authoritativ
 ## Repository layout
 
 ```text
-apps/mobile/       Flutter client
+apps/game/         Flutter client for iOS, Android, and Web
 services/game/     Colyseus realtime game server
 functions/         Firebase Functions for non-realtime workflows
 packages/shared/   Shared contracts and validation fixtures
-firebase/          Rules, indexes, emulator fixtures, configuration templates
+firebase/          Hosting config, rules, indexes, emulator fixtures
 docs/              Product, UX, architecture, and delivery plans
 ```
 
@@ -48,14 +48,14 @@ docs/              Product, UX, architecture, and delivery plans
 - Touch feedback begins on the next rendered frame
 - No network round-trip is required for local input feedback
 - Server remains authoritative for accepted words and score
-- Gameplay stays usable around notches, Dynamic Island, cutouts, gesture bars, and keyboards
+- Gameplay stays usable around notches, Dynamic Island, cutouts, gesture bars, keyboards, and responsive browser viewports
 - Rejoining players recover the authoritative room snapshot
 - No client-submitted score is trusted
 - App Check and Firebase Security Rules enforce the client trust boundary
 
 ## Delivery order
 
-1. Product rules, Firebase environments, and protocol contracts
+1. Product rules, Firebase environments, Hosting preview channels, and protocol contracts
 2. Anonymous Firebase Authentication, room creation, code join, lobby, ready state, reconnect
 3. Core word loop and server validation on Cloud Run
 4. Mobile HUD, safe areas, touch latency, haptics
@@ -66,4 +66,4 @@ See [Game Design](docs/GAME_DESIGN.md), [Architecture](docs/ARCHITECTURE.md), [F
 
 ## Status
 
-Pre-production foundation. The first implementation milestone is a playable Firebase-integrated private-room vertical slice.
+Pre-production foundation. The first implementation milestone is a playable Firebase Hosting-integrated private-room vertical slice, with native mobile builds from the same Flutter codebase.
