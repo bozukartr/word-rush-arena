@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  game-server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/game
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: services/game/package-lock.json
+      - run: npm install
+      - run: npm run check
+
+  flutter-web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/game
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web

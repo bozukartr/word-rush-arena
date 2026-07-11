@@ -20,9 +20,11 @@ Exit: Firebase emulators run locally, a Flutter Web shell deploys to a Hosting p
 
 Goal: two real devices can complete a reliable match.
 
-- Build the Flutter client for iOS, Android, and Web/PWA from one codebase\n- Deploy the web client to a Firebase Hosting preview channel\n- Anonymous Firebase Authentication with stable UID
+- Build the Flutter client for iOS, Android, and Web/PWA from one codebase
+- Deploy the web client to a Firebase Hosting preview channel
+- Anonymous Firebase Authentication with stable UID
 - Firebase ID token and App Check verification in the game service
-- Deploy a warm development Colyseus service to Cloud Run
+- Deploy a warm development WebSocket game service to Cloud Run
 - Create room and generate six-character code
 - Join by code
 - Lobby roster, host, ready state, leave, kick, and room-full handling
@@ -47,7 +49,8 @@ Goal: the game feels instant and remains usable across mobile devices, supported
 - Reconnect grace period and authoritative snapshot recovery
 - Background/foreground lifecycle handling
 - Idempotent submission and duplicate-tap protection
-- Mid-tier Android, representative iOS, mobile Safari, and Chromium performance pass\n- Firebase Hosting cache, service-worker update, offline shell, and rollback tests
+- Mid-tier Android, representative iOS, mobile Safari, and Chromium performance pass
+- Firebase Hosting cache, service-worker update, offline shell, and rollback tests
 
 Exit: device matrix and poor-network scenarios meet agreed acceptance criteria.
 
@@ -96,7 +99,8 @@ Exit: soft-launch candidate with measurable retention and fair monetization.
 
 ### P0
 
-- Firebase project separation, FlutterFire setup, and Hosting targets\n- Hosting preview-channel CI and cache policy
+- Firebase project separation, FlutterFire setup, and Hosting targets
+- Hosting preview-channel CI and cache policy
 - Auth + App Check verification path
 - Firestore Security Rules and emulator tests
 - Room state machine and code service

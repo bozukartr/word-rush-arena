@@ -1,0 +1,22 @@
+name: word_rush_arena
+description: Competitive multiplayer Turkish word puzzle.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_auth: ^6.5.4
+  firebase_core: ^4.11.0
+  web_socket_channel: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

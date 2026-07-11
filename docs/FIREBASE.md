@@ -53,7 +53,7 @@ seasons/{seasonId}
 moderation/{uid}     # trusted/admin only
 ```
 
-Live letter selections, authoritative timers, accepted words, and rapidly changing match state remain in the Colyseus room, not Firestore.
+Live letter selections, authoritative timers, accepted words, and rapidly changing match state remain in the authoritative WebSocket room, not Firestore.
 
 ## Security Rules principles
 
@@ -80,9 +80,17 @@ Enforce App Check gradually:
 
 App Check raises the cost of abuse but does not replace server validation or rate limiting.
 
-## Firebase Hosting\n\nFirebase Hosting deploys the Flutter web build from `apps/game/build/web`. Recommended behavior:\n\n- rewrite SPA routes to `/index.html`\n- cache fingerprinted assets as public and immutable\n- keep `index.html`, service-worker metadata, and bootstrap files on short/no cache\n- use preview channels for pull requests and acceptance testing\n- configure separate development, staging, and production Hosting targets\n- attach the production custom domain only after staging acceptance\n- route ordinary HTTPS endpoints to Functions/Cloud Run only when useful\n- connect realtime play directly to the Cloud Run `wss://` endpoint\n\nFirebase Hosting does not distribute native iOS/Android binaries and does not replace the WebSocket game process.\n\n## Cloud Run game service
+## Firebase Hosting\n\nFirebase Hosting deploys the Flutter web build from `apps/game/build/web`. Recommended behavior:\n
+- rewrite SPA routes to `/index.html`
+- cache fingerprinted assets as public and immutable
+- keep `index.html`, service-worker metadata, and bootstrap files on short/no cache
+- use preview channels for pull requests and acceptance testing
+- configure separate development, staging, and production Hosting targets
+- attach the production custom domain only after staging acceptance
+- route ordinary HTTPS endpoints to Functions/Cloud Run only when useful
+- connect realtime play directly to the Cloud Run `wss://` endpoint\n\nFirebase Hosting does not distribute native iOS/Android binaries and does not replace the WebSocket game process.\n\n## Cloud Run game service
 
-Colyseus runs as a dedicated Cloud Run service with WebSocket support. Configure:
+The Node.js JSON WebSocket game server runs as a dedicated Cloud Run service with WebSocket support. Configure:
 
 - regional placement near the initial player market
 - minimum warm instances for acceptable cold-start behavior
@@ -116,4 +124,5 @@ Do not log submitted word text, room codes, tokens, or other sensitive payloads 
 - Avoid using Firestore as a high-frequency game-state bus.
 - Sample verbose telemetry.
 - Apply retention policies to logs and temporary data.
-- Load-test Cloud Run concurrency and minimum instances before soft launch.\n- Set deliberate Hosting cache headers to avoid stale Flutter app shells.
+- Load-test Cloud Run concurrency and minimum instances before soft launch.
+- Set deliberate Hosting cache headers to avoid stale Flutter app shells.

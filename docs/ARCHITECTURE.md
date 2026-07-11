@@ -8,7 +8,8 @@ Responsible for rendering, safe-area layout, touch handling, local prediction, h
 
 ### Firebase platform
 
-- **Hosting:** Flutter Web/PWA assets, global CDN, SSL, custom domain, and preview channels\n- **Authentication:** anonymous-first identity with optional account upgrade
+- **Hosting:** Flutter Web/PWA assets, global CDN, SSL, custom domain, and preview channels
+- **Authentication:** anonymous-first identity with optional account upgrade
 - **Firestore:** player profiles, public progression, server-written match summaries, ratings, cosmetics, moderation state
 - **App Check:** attestation for mobile requests and custom-backend calls
 - **Analytics, Crashlytics, Performance:** product and client quality telemetry
@@ -19,9 +20,9 @@ Responsible for rendering, safe-area layout, touch handling, local prediction, h
 
 Firestore is not the authoritative live match transport. Firebase Hosting serves the web client but does not execute the match loop.
 
-### Firebase Hosting\n\nFirebase Hosting serves the compiled Flutter Web/PWA bundle and optional landing/admin static assets. HTTPS API routes may be rewritten to Cloud Functions or Cloud Run where appropriate. The realtime client connects directly to the dedicated Cloud Run WebSocket endpoint over `wss://`; Hosting is not treated as the game server.\n\nLong-cache hashed assets, short-cache app shells, preview channels, and per-environment Hosting sites are required. Native iOS and Android builds are distributed through their normal app channels, not Firebase Hosting.\n\n### Colyseus game service on Cloud Run
+### Firebase Hosting\n\nFirebase Hosting serves the compiled Flutter Web/PWA bundle and optional landing/admin static assets. HTTPS API routes may be rewritten to Cloud Functions or Cloud Run where appropriate. The realtime client connects directly to the dedicated Cloud Run WebSocket endpoint over `wss://`; Hosting is not treated as the game server.\n\nLong-cache hashed assets, short-cache app shells, preview channels, and per-environment Hosting sites are required. Native iOS and Android builds are distributed through their normal app channels, not Firebase Hosting.\n\n### Authoritative WebSocket game service on Cloud Run
 
-Owns room lifecycle, membership, ready states, authoritative timer, letter pool, word validation, duplicate policy, scoring, results, reconnect snapshots, and abuse controls. It verifies Firebase ID tokens and App Check tokens before admitting a player.
+A Node.js and TypeScript JSON WebSocket service owns room lifecycle, membership, ready states, authoritative timer, letter pool, word validation, duplicate policy, scoring, results, reconnect snapshots, and abuse controls. It verifies Firebase ID tokens and App Check tokens before admitting a player.
 
 Cloud Run is used because live matches require a dedicated WebSocket-capable process. Cloud Functions are reserved for short-lived or event-driven work, not the match loop.
 
@@ -149,7 +150,8 @@ Remote Config may tune presentation and rollout behavior, but authoritative scor
 ## Performance budgets
 
 - Local touch response: next frame
-- Client frame pacing: stable at target refresh rate on mid-tier devices and supported browsers\n- Hosting delivery: immutable hashed assets cached at the CDN; app shell updated safely
+- Client frame pacing: stable at target refresh rate on mid-tier devices and supported browsers
+- Hosting delivery: immutable hashed assets cached at the CDN; app shell updated safely
 - Regional gameplay RTT target: below 150 ms where infrastructure permits
 - Server command processing: p95 below 50 ms excluding external persistence
 - Room broadcasts: compact deltas; snapshots reserved for join/reconnect/recovery

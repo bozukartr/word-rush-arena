@@ -1,0 +1,11 @@
+{
+  "name": "Word Rush Arena",
+  "short_name": "Word Rush",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0B0D18",
+  "theme_color": "#7657FF",
+  "description": "Competitive multiplayer word puzzle.",
+  "orientation": "portrait-primary",
+  "icons": []
+}

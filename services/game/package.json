@@ -1,0 +1,27 @@
+{
+  "name": "@word-rush-arena/game-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "check": "npm run build && npm test"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "firebase-admin": "14.1.0",
+    "ws": "8.18.3",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.3",
+    "@types/node": "24.7.2",
+    "@types/ws": "8.18.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

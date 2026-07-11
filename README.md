@@ -18,14 +18,15 @@ Players race against each other to build valid words from the same letter pool. 
 - Reconnect grace period
 - Mobile-first HUD with safe-area support
 - Low-latency tap, drag, submit, haptic, and audio feedback
-- Flutter Web/PWA delivery through Firebase Hosting\n- Firebase-backed identity, player data, telemetry, messaging, and live configuration
+- Flutter Web/PWA delivery through Firebase Hosting
+- Firebase-backed identity, player data, telemetry, messaging, and live configuration
 - Ranked matchmaking and MMR after the private-room vertical slice is stable
 
 ## Proposed stack
 
 - **Mobile:** Flutter
 - **Firebase:** Authentication, Firestore, App Check, Analytics, Crashlytics, Performance Monitoring, Remote Config, Cloud Messaging
-- **Realtime game server:** Node.js, TypeScript, Colyseus on Google Cloud Run
+- **Realtime game server:** Node.js, TypeScript, JSON WebSocket service on Google Cloud Run
 - **Serverless workflows:** Cloud Functions for Firebase (2nd gen)
 - **Ephemeral state / scale-out:** Redis-compatible Google Cloud Memorystore when multi-instance coordination is required
 - **Shared contracts:** versioned JSON schemas and protocol documentation
@@ -36,7 +37,7 @@ Firebase is the product platform, but the live match remains server-authoritativ
 
 ```text
 apps/game/         Flutter client for iOS, Android, and Web
-services/game/     Colyseus realtime game server
+services/game/     Authoritative JSON WebSocket game server
 functions/         Firebase Functions for non-realtime workflows
 packages/shared/   Shared contracts and validation fixtures
 firebase/          Hosting config, rules, indexes, emulator fixtures

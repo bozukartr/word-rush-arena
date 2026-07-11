@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "word-rush-arena-dev"
+  },
+  "targets": {
+    "word-rush-arena-dev": {
+      "hosting": {
+        "game": ["word-rush-arena-dev"]
+      }
+    }
+  }
+}
