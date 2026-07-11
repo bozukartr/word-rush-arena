@@ -1,17 +1,19 @@
 # Development
 
+Firebase project: `wordrusharena`
+
 ## Prerequisites
 
 - Flutter stable
 - Node.js 22+
 - Firebase CLI
-- A Firebase development project
+- Access to the `wordrusharena` Firebase project
 
 ## Game server
 
 ```bash
 cd services/game
-npm ci
+npm install
 ALLOW_INSECURE_AUTH=true npm run dev
 ```
 
@@ -37,25 +39,31 @@ Without Firebase compile-time values, local development uses the server's insecu
 
 ## Firebase-enabled build
 
+Obtain the Web App values from Firebase Console → Project settings → Your apps, or generate them with FlutterFire CLI.
+
 ```bash
 flutter build web \
   --dart-define=GAME_SERVER_URL=wss://GAME_SERVICE_HOST/game \
   --dart-define=FIREBASE_API_KEY=... \
   --dart-define=FIREBASE_APP_ID=... \
   --dart-define=FIREBASE_MESSAGING_SENDER_ID=... \
-  --dart-define=FIREBASE_PROJECT_ID=... \
-  --dart-define=FIREBASE_AUTH_DOMAIN=... \
-  --dart-define=FIREBASE_STORAGE_BUCKET=...
+  --dart-define=FIREBASE_PROJECT_ID=wordrusharena \
+  --dart-define=FIREBASE_AUTH_DOMAIN=wordrusharena.firebaseapp.com \
+  --dart-define=FIREBASE_STORAGE_BUCKET=wordrusharena.firebasestorage.app
 ```
 
-Never commit service-account credentials. Firebase client configuration is public by design, but production values should still be injected by the build pipeline so environments cannot be mixed accidentally.
+Never commit service-account credentials. Firebase client configuration is public by design, but production values should be injected by the build pipeline so environments cannot be mixed accidentally.
 
 ## Firebase emulators and Hosting
 
 ```bash
-cp .firebaserc.example .firebaserc
+firebase use wordrusharena
 firebase emulators:start
-firebase hosting:channel:deploy preview
+firebase hosting:channel:deploy preview --project wordrusharena
 ```
 
-Replace the example project and Hosting target before deployment.
+Production deployment:
+
+```bash
+firebase deploy --only hosting,firestore:rules,firestore:indexes,storage --project wordrusharena
+```
