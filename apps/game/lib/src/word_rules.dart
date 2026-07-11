@@ -1,4 +1,5 @@
 import 'package:characters/characters.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 const roomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -8,14 +9,14 @@ const _guaranteedSeed = "OYUN";
 
 const _baseScore = <int, int>{2: 40, 3: 100, 4: 180, 5: 300, 6: 460};
 
-/// Development fixture only. Replace with a licensed, versioned Turkish dictionary asset.
-final Set<String> developmentDictionary =
-    <String>{
-      "ada", "aile", "akıl", "alan", "ana", "ara", "arı", "at", "ateş", "ay",
-      "bal", "bar", "baş", "bil", "bir", "dal", "dil", "el", "ev", "gül",
-      "kal", "kelime", "kır", "masa", "oyun", "sal", "sel", "sen", "söz", "taş",
-      "tel", "tur", "yar", "yol", "zor",
-    }.map(normalizeTurkishWord).toSet();
+/// Turkish dictionary, loaded from the bundled Hunspell-derived word list
+/// (see assets/dictionaries/NOTICE.md). Empty until [loadDictionary] resolves.
+Set<String> wordDictionary = const <String>{};
+
+Future<void> loadDictionary() async {
+  final raw = await rootBundle.loadString('assets/dictionaries/tr_words.txt');
+  wordDictionary = raw.split('\n').map((line) => line.trim()).where((line) => line.isNotEmpty).toSet();
+}
 
 /// Dart has no locale-aware case conversion, so the ambiguous Turkish I/İ
 /// pair must be rewritten before falling back to standard [toLowerCase].

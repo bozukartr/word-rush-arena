@@ -254,7 +254,7 @@ class GameController extends ChangeNotifier {
     final word = normalizeTurkishWord(rawWord);
     if (word.characters.length < 2) return _reject('WORD_TOO_SHORT');
     if (!canBuildWord(word, letters)) return _reject('LETTERS_NOT_AVAILABLE');
-    if (!developmentDictionary.contains(word)) return _reject('WORD_NOT_FOUND');
+    if (!wordDictionary.contains(word)) return _reject('WORD_NOT_FOUND');
     if (remainingSeconds <= 0) return _reject('MATCH_NOT_ACTIVE');
 
     final points = scoreWord(word, _combo);
