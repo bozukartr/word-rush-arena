@@ -8,7 +8,7 @@ Responsible for rendering, safe-area layout, touch handling, local prediction, h
 
 ### Firebase platform
 
-- **Authentication:** anonymous-first identity with optional account upgrade
+- **Hosting:** Flutter Web/PWA assets, global CDN, SSL, custom domain, and preview channels\n- **Authentication:** anonymous-first identity with optional account upgrade
 - **Firestore:** player profiles, public progression, server-written match summaries, ratings, cosmetics, moderation state
 - **App Check:** attestation for mobile requests and custom-backend calls
 - **Analytics, Crashlytics, Performance:** product and client quality telemetry
@@ -17,9 +17,9 @@ Responsible for rendering, safe-area layout, touch handling, local prediction, h
 - **Cloud Functions (2nd gen):** scheduled jobs, notification fan-out, leaderboard materialization, moderation and maintenance
 - **Cloud Storage:** versioned non-secret assets where needed
 
-Firestore is not the authoritative live match transport.
+Firestore is not the authoritative live match transport. Firebase Hosting serves the web client but does not execute the match loop.
 
-### Colyseus game service on Cloud Run
+### Firebase Hosting\n\nFirebase Hosting serves the compiled Flutter Web/PWA bundle and optional landing/admin static assets. HTTPS API routes may be rewritten to Cloud Functions or Cloud Run where appropriate. The realtime client connects directly to the dedicated Cloud Run WebSocket endpoint over `wss://`; Hosting is not treated as the game server.\n\nLong-cache hashed assets, short-cache app shells, preview channels, and per-environment Hosting sites are required. Native iOS and Android builds are distributed through their normal app channels, not Firebase Hosting.\n\n### Colyseus game service on Cloud Run
 
 Owns room lifecycle, membership, ready states, authoritative timer, letter pool, word validation, duplicate policy, scoring, results, reconnect snapshots, and abuse controls. It verifies Firebase ID tokens and App Check tokens before admitting a player.
 
@@ -32,7 +32,7 @@ Stores short-lived room lookup data, distributed locks, rate limits, presence, m
 ## Repository boundaries
 
 ```text
-apps/mobile/
+apps/game/
   lib/
     app/
     core/firebase/
@@ -68,7 +68,7 @@ firebase/
 
 ## Identity and session flow
 
-1. Mobile app creates or restores a Firebase Auth session.
+1. Native or web game client creates or restores a Firebase Auth session.
 2. App obtains a Firebase ID token and App Check token.
 3. Client requests room creation/join from the game service.
 4. Game service verifies both tokens using Firebase Admin SDK.
@@ -121,7 +121,7 @@ Dictionary, scoring, and protocol versions are attached to every match summary.
 
 ## Firestore trust boundary
 
-Mobile clients may read permitted profile and public competition data and may update narrowly scoped preferences. Security Rules deny direct client writes to:
+Game clients may read permitted profile and public competition data and may update narrowly scoped preferences. Security Rules deny direct client writes to:
 
 - accepted words and score
 - match results
@@ -149,7 +149,7 @@ Remote Config may tune presentation and rollout behavior, but authoritative scor
 ## Performance budgets
 
 - Local touch response: next frame
-- Client frame pacing: stable at target refresh rate on mid-tier devices
+- Client frame pacing: stable at target refresh rate on mid-tier devices and supported browsers\n- Hosting delivery: immutable hashed assets cached at the CDN; app shell updated safely
 - Regional gameplay RTT target: below 150 ms where infrastructure permits
 - Server command processing: p95 below 50 ms excluding external persistence
 - Room broadcasts: compact deltas; snapshots reserved for join/reconnect/recovery
