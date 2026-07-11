@@ -30,6 +30,6 @@ class FirebaseBootstrap {
 
   static Future<String?> idToken() async {
     if (!isConfigured) return null;
-    return FirebaseAuth.instance.currentUser?.getIdToken();
+    final user = FirebaseAuth.instance.currentUser;\n    if (user == null) return null;\n    return user.getIdToken();
   }
 }
