@@ -2,8 +2,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/fireba
 import { getAnalytics, isSupported as analyticsSupported, logEvent } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js";
 import {
-  GoogleAuthProvider, connectAuthEmulator, getAuth, getRedirectResult, onAuthStateChanged,
-  signInWithPopup, signInWithRedirect, signOut
+  GoogleAuthProvider, connectAuthEmulator, getAuth, getRedirectResult, linkWithPopup,
+  linkWithRedirect, onAuthStateChanged, signInAnonymously, signInWithPopup, signInWithRedirect, signOut
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp, collection, connectFirestoreEmulator, doc, getDoc, getDocs,
@@ -44,7 +44,7 @@ const ui = Object.fromEntries([
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
   "coinBadge", "coinText", "attackButton", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
-  "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "logoutButton",
+  "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "guestLoginButton", "logoutButton",
   "quickMatchButton", "quickMatchStatus", "profileName", "profileCode", "profileCoins", "profileDiamonds",
   "friendCodeInput", "addFriendButton", "friendList", "friendRequests", "profileBackButton",
   "effectsCanvas", "bottomNav", "navPlay", "navMarket", "navProfile", "marketGrid", "marketBackButton",
@@ -185,8 +185,13 @@ function friendCodeFor(uid) {
   return uid.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLocaleUpperCase("tr-TR");
 }
 
+function authDisplayName(user = auth.currentUser) {
+  return user?.displayName || `Misafir ${(user?.uid ?? "PLAY").slice(0, 4).toLocaleUpperCase("tr-TR")}`;
+}
+
 async function ensureProfile(user = auth.currentUser) {
   const friendCode = friendCodeFor(user.uid);
+  const displayName = authDisplayName(user);
   await runTransaction(db, async (transaction) => {
     const ref = profileRef();
     const snapshot = await transaction.get(ref);
@@ -194,12 +199,12 @@ async function ensureProfile(user = auth.currentUser) {
       transaction.set(ref, {
         coins: 0, diamonds: 0, wins: 0, inventory: { a_lock: 0 },
         ownedThemes: ["default"], activeTheme: "default", lastAction: null, friendCode,
-        displayName: user.displayName ?? "Oyuncu", photoURL: user.photoURL ?? "",
+        displayName, photoURL: user.photoURL ?? "",
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
     } else {
       transaction.update(ref, {
-        displayName: user.displayName ?? snapshot.data().displayName ?? "Oyuncu",
+        displayName: user.displayName ?? snapshot.data().displayName ?? displayName,
         photoURL: user.photoURL ?? snapshot.data().photoURL ?? "",
         friendCode: snapshot.data().friendCode ?? friendCode,
         diamonds: snapshot.data().diamonds ?? 0,
@@ -213,7 +218,7 @@ async function ensureProfile(user = auth.currentUser) {
   });
   await setDoc(doc(db, "handles", friendCode), {
     uid: user.uid,
-    displayName: user.displayName ?? "Oyuncu",
+    displayName,
     photoURL: user.photoURL ?? "",
     updatedAt: serverTimestamp()
   }, { merge: true });
@@ -1156,14 +1161,24 @@ function setBusy(value) {
 
 async function googleLogin() {
   try {
-    await signInWithPopup(auth, googleProvider);
+    if (auth.currentUser?.isAnonymous) await linkWithPopup(auth.currentUser, googleProvider);
+    else await signInWithPopup(auth, googleProvider);
   } catch (error) {
     if (["auth/popup-blocked", "auth/cancelled-popup-request", "auth/operation-not-supported-in-this-environment"].includes(error.code)) {
-      await signInWithRedirect(auth, googleProvider);
+      if (auth.currentUser?.isAnonymous) await linkWithRedirect(auth.currentUser, googleProvider);
+      else await signInWithRedirect(auth, googleProvider);
       return;
     }
-    toast("Google girişi açılamadı.", true);
+    const message = error.code === "auth/credential-already-in-use"
+      ? "Bu Google hesabının mevcut profili var. Önce çıkış yaparak Google ile gir."
+      : "Google girişi açılamadı.";
+    toast(message, true);
   }
+}
+
+async function guestLogin() {
+  try { await signInAnonymously(auth); }
+  catch (error) { toast("Misafir oturumu açılamadı.", true); }
 }
 
 async function logout() {
@@ -1180,6 +1195,7 @@ async function logout() {
 ui.createRoomButton.addEventListener("click", createRoom);
 ui.joinRoomButton.addEventListener("click", joinRoom);
 ui.googleLoginButton.addEventListener("click", googleLogin);
+ui.guestLoginButton.addEventListener("click", guestLogin);
 ui.logoutButton.addEventListener("click", logout);
 ui.quickMatchButton.addEventListener("click", quickMatch);
 ui.profileButton.addEventListener("click", () => showScreen("profileScreen"));
@@ -1216,8 +1232,11 @@ ui.playerName.value = localStorage.getItem("wra-player-name") ?? "";
 ui.soundToggle.textContent = isSoundEnabled() ? "SES AÇIK" : "SES KAPALI";
 initEffects(ui.effectsCanvas);
 onAuthStateChanged(auth, async (user) => {
-  const signedIn = Boolean(user && !user.isAnonymous);
-  ui.googleLoginButton.classList.toggle("hidden", signedIn);
+  const signedIn = Boolean(user);
+  const guest = Boolean(user?.isAnonymous);
+  ui.googleLoginButton.classList.toggle("hidden", signedIn && !guest);
+  ui.googleLoginButton.innerHTML = `<span>G</span> ${guest ? "GOOGLE'A BAĞLA" : "GOOGLE İLE GİRİŞ"}`;
+  ui.guestLoginButton.classList.toggle("hidden", signedIn);
   ui.logoutButton.classList.toggle("hidden", !signedIn);
   ui.createRoomButton.disabled = !signedIn;
   ui.joinRoomButton.disabled = !signedIn;
@@ -1237,8 +1256,8 @@ onAuthStateChanged(auth, async (user) => {
     await ensureProfile(user);
   }
   catch (error) { toast(error.message, true); return; }
-  ui.playerName.value = user.displayName ?? localStorage.getItem("wra-player-name") ?? "";
-  setConnection("online", "Çevrimiçi");
+  ui.playerName.value = user.displayName ?? state.profile?.displayName ?? localStorage.getItem("wra-player-name") ?? "";
+  setConnection("online", guest ? "Misafir" : "Çevrimiçi");
   showScreen("homeScreen");
   track("app_ready");
 });
