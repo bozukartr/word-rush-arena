@@ -6,23 +6,53 @@ service cloud.firestore {
     function roomExistsAfter(code) { return existsAfter(/databases/$(database)/documents/rooms/$(code)); }
     function isPlayer(code) { return signedIn() && exists(/databases/$(database)/documents/rooms/$(code)/players/$(request.auth.uid)); }
     function isHost(code) { return signedIn() && get(/databases/$(database)/documents/rooms/$(code)).data.hostId == request.auth.uid; }
-    function validAttackPurchase(uid) {
+    function validPowerUse(uid) {
       let action = request.resource.data.lastAction;
       let code = action.roomCode;
       let round = action.round;
-      let profileBefore = resource.data;
+      let inventoryBefore = resource.data.get('inventory', {'a_lock': 0});
       let playerBefore = get(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
       let playerAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
       let effectAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/effects/$(uid)).data;
-      return action.type == 'attack'
+      return action.type == 'power'
+        && action.itemId == 'a_lock'
         && action.roomCode is string
         && action.round is int
-        && request.resource.data.coins == profileBefore.coins - 25
+        && request.resource.data.coins == resource.data.coins
+        && request.resource.data.diamonds == resource.data.get('diamonds', 0)
+        && request.resource.data.inventory.a_lock == inventoryBefore.get('a_lock', 0) - 1
         && get(/databases/$(database)/documents/rooms/$(code)).data.phase == 'playing'
         && playerBefore.get('attackUsedRound', -1) != round
         && playerAfter.attackUsedRound == round
         && effectAfter.ownerId == uid
         && effectAfter.round == round;
+    }
+    function marketPrice(itemId) {
+      return itemId == 'aurora' ? 3 : itemId == 'obsidian' ? 5 : itemId == 'royal' ? 8 : 0;
+    }
+    function validMarketPurchase() {
+      let action = request.resource.data.lastAction;
+      let inventoryBefore = resource.data.get('inventory', {'a_lock': 0});
+      let themesBefore = resource.data.get('ownedThemes', ['default']);
+      let themePrice = marketPrice(action.itemId);
+      return action.type == 'market' && (
+        (
+          action.itemId == 'a_lock'
+          && action.currency == 'coins'
+          && action.price == 25
+          && request.resource.data.coins == resource.data.coins - 25
+          && request.resource.data.diamonds == resource.data.get('diamonds', 0)
+          && request.resource.data.inventory.a_lock == inventoryBefore.get('a_lock', 0) + 1
+        ) || (
+          themePrice > 0
+          && action.currency == 'diamonds'
+          && action.price == themePrice
+          && request.resource.data.coins == resource.data.coins
+          && request.resource.data.diamonds == resource.data.get('diamonds', 0) - themePrice
+          && request.resource.data.ownedThemes.hasAny([action.itemId])
+          && request.resource.data.ownedThemes.size() == themesBefore.size() + 1
+        )
+      );
     }
     function validRoundReward(uid) {
       let action = request.resource.data.lastAction;
@@ -90,8 +120,8 @@ service cloud.firestore {
           && request.resource.data.expiresAt is timestamp
           && get(/databases/$(database)/documents/rooms/$(code)).data.phase == 'playing'
           && exists(/databases/$(database)/documents/rooms/$(code)/players/$(request.resource.data.targetId))
-          && getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.coins
-            == get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.coins - 25
+          && getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.inventory.a_lock
+            == get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.get('inventory', {'a_lock': 0}).get('a_lock', 0) - 1
           && getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(request.auth.uid)).data.attackUsedRound
             == request.resource.data.round
           && (!exists(/databases/$(database)/documents/rooms/$(code)/effects/$(effectId))
@@ -106,20 +136,29 @@ service cloud.firestore {
         && request.resource.data.coins == 0
         && request.resource.data.diamonds == 0
         && request.resource.data.wins == 0
+        && request.resource.data.inventory is map
+        && request.resource.data.ownedThemes is list
+        && request.resource.data.activeTheme == 'default'
         && request.resource.data.lastAction == null
         && request.resource.data.friendCode is string;
       allow update: if signedIn() && request.auth.uid == uid
         && (
           (
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['displayName', 'photoURL', 'friendCode', 'diamonds', 'wins', 'updatedAt'])
+              .hasOnly(['displayName', 'photoURL', 'friendCode', 'diamonds', 'wins', 'inventory', 'ownedThemes', 'activeTheme', 'updatedAt'])
             && request.resource.data.displayName is string
             && request.resource.data.friendCode is string
             && request.resource.data.diamonds == resource.data.get('diamonds', 0)
             && request.resource.data.wins == resource.data.get('wins', 0)
+            && request.resource.data.inventory == resource.data.get('inventory', request.resource.data.inventory)
+            && request.resource.data.ownedThemes == resource.data.get('ownedThemes', request.resource.data.ownedThemes)
+            && request.resource.data.activeTheme == resource.data.get('activeTheme', request.resource.data.activeTheme)
+          ) || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeTheme', 'updatedAt'])
+            && request.resource.data.ownedThemes.hasAny([request.resource.data.activeTheme])
           ) || (
             request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['coins', 'diamonds', 'wins', 'lastAction', 'updatedAt'])
+              .hasOnly(['coins', 'diamonds', 'wins', 'inventory', 'ownedThemes', 'lastAction', 'updatedAt'])
             && request.resource.data.coins is int
             && request.resource.data.coins >= 0
             && request.resource.data.coins <= 100000
@@ -127,8 +166,14 @@ service cloud.firestore {
             && request.resource.data.diamonds >= 0
             && request.resource.data.wins is int
             && request.resource.data.wins >= 0
+            && request.resource.data.inventory is map
+            && request.resource.data.ownedThemes is list
             && request.resource.data.lastAction is map
-            && (validAttackPurchase(uid) || validRoundReward(uid))
+            && (
+              (request.resource.data.lastAction.type == 'power' && validPowerUse(uid))
+              || (request.resource.data.lastAction.type == 'reward' && validRoundReward(uid))
+              || (request.resource.data.lastAction.type == 'market' && validMarketPurchase())
+            )
           )
         );
       allow delete: if false;
