@@ -262,18 +262,16 @@ async function addFriend() {
     if (!handle.exists() || handle.data().uid === state.uid) throw new Error("Oyuncu bulunamadı.");
     const target = handle.data();
     const ref = doc(db, "friendships", friendshipId(state.uid, target.uid));
-    await runTransaction(db, async (transaction) => {
-      if ((await transaction.get(ref)).exists()) throw new Error("Arkadaşlık isteği zaten var.");
-      transaction.set(ref, {
-        members: [state.uid, target.uid].sort(),
-        requestedBy: state.uid,
-        status: "pending",
-        people: [
-          { uid: state.uid, name: state.profile?.displayName ?? "Oyuncu", photoURL: state.profile?.photoURL ?? "" },
-          { uid: target.uid, name: target.displayName ?? "Oyuncu", photoURL: target.photoURL ?? "" }
-        ],
-        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-      });
+    if (state.friendships.some((item) => item.id === ref.id)) throw new Error("Arkadaşlık isteği zaten var.");
+    await setDoc(ref, {
+      members: [state.uid, target.uid].sort(),
+      requestedBy: state.uid,
+      status: "pending",
+      people: [
+        { uid: state.uid, name: state.profile?.displayName ?? "Oyuncu", photoURL: state.profile?.photoURL ?? "" },
+        { uid: target.uid, name: target.displayName ?? "Oyuncu", photoURL: target.photoURL ?? "" }
+      ],
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     });
     ui.friendCodeInput.value = "";
     toast("Arkadaşlık isteği gönderildi.");
