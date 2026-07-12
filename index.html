@@ -15,7 +15,7 @@
     <header class="brand-bar">
       <button id="leaveButton" class="icon-button hidden" type="button" aria-label="Odadan çık">‹</button>
       <div class="mini-brand"><strong>WRA</strong></div>
-      <div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div>
+      <div class="header-status"><div id="coinBadge" class="coin-badge hidden">◆ <b id="coinText">0</b></div><div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div></div>
     </header>
 
     <section id="loadingScreen" class="screen active loading-screen">
@@ -59,6 +59,7 @@
         <div class="hud-card"><span>SIRA</span><strong id="rankText">–</strong></div>
       </div>
       <div class="status-line"><span id="gameStatus">Harfleri seç</span><div class="status-meta"><span id="stockText" class="stock-count">KALAN –</span><b id="comboText"></b></div></div>
+      <div class="combat-bar"><button id="attackButton" class="attack-button" type="button" disabled>A KİLİTLE · 25</button></div>
       <div id="letterGrid" class="letter-grid" aria-label="Harf havuzu"></div>
       <div class="word-composer">
         <div id="currentWord" class="current-word" aria-live="polite"><span>Kelime</span></div>
@@ -70,11 +71,18 @@
       </div>
       <button id="submitWordButton" class="button button-primary submit-button" type="button" disabled>GÖNDER</button>
       <div id="recentWords" class="recent-words"></div>
+      <div id="attackPicker" class="attack-picker hidden" role="dialog" aria-modal="true" aria-label="Rakip seç">
+        <div class="attack-sheet">
+          <div class="attack-sheet-head"><strong>HEDEF</strong><button id="closeAttackButton" class="icon-button solid" type="button" aria-label="Kapat">×</button></div>
+          <div id="attackTargets" class="attack-targets"></div>
+        </div>
+      </div>
     </section>
 
     <section id="resultsScreen" class="screen results-screen">
       <div class="trophy">★</div>
       <h2 id="winnerText">Kazanan!</h2>
+      <p id="rewardText" class="reward-text"></p>
       <div id="resultsList" class="results-list"></div>
       <button id="rematchButton" class="button button-gold hidden" type="button">TEKRAR OYNA</button>
       <p id="rematchStatus" class="rematch-status"></p>
