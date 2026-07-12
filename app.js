@@ -41,6 +41,22 @@ const ui = Object.fromEntries([
 
 const dictionaryReady = loadDictionary();
 
+const LETTER_POINTS = Object.freeze({
+  A: 1, B: 3, C: 4, Ç: 4, D: 3, E: 1, F: 7, G: 5, Ğ: 8,
+  H: 5, I: 2, İ: 2, J: 10, K: 2, L: 1, M: 2, N: 1, O: 2,
+  Ö: 7, P: 5, R: 1, S: 2, Ş: 4, T: 1, U: 2, Ü: 3, V: 7,
+  Y: 5, Z: 4
+});
+const LETTER_POOL = "AAAAABCDEEEFGĞHIIİJKLMNOÖPRSTUÜVYZ";
+
+function letterPoint(letter) {
+  return LETTER_POINTS[letter.toLocaleUpperCase("tr-TR")] ?? 1;
+}
+
+function randomLetter() {
+  return LETTER_POOL[Math.floor(Math.random() * LETTER_POOL.length)];
+}
+
 const state = {
   uid: null,
   roomCode: null,
@@ -51,6 +67,7 @@ const state = {
   combo: 0,
   submitting: false,
   ready: false,
+  boardVersion: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -109,9 +126,8 @@ function shuffle(items) {
 
 function createLetters() {
   const seed = randomSeedWord();
-  const pool = "AAAAABCDEEEFGĞHIIİJKLMNOÖPRSTUÜVYZ";
   const letters = [...seed.toLocaleUpperCase("tr-TR")];
-  while (letters.length < 12) letters.push(pool[Math.floor(Math.random() * pool.length)]);
+  while (letters.length < 12) letters.push(randomLetter());
   return shuffle(letters.slice(0, 12));
 }
 
@@ -126,7 +142,7 @@ async function createRoom() {
         const ref = roomRef(candidate);
         if ((await transaction.get(ref)).exists()) return false;
         transaction.set(ref, {
-          hostId: state.uid, phase: "lobby", round: 0, maxPlayers: 4, letters: [], endsAt: null,
+          hostId: state.uid, phase: "lobby", round: 0, boardVersion: 0, maxPlayers: 4, letters: [], endsAt: null,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         transaction.set(playerRef(state.uid, candidate), {
@@ -173,7 +189,17 @@ async function enterRoom(code) {
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
-    state.room = snapshot.data();
+    const nextRoom = snapshot.data();
+    const nextVersion = nextRoom.boardVersion ?? 0;
+    if (
+      state.boardVersion !== null &&
+      nextVersion !== state.boardVersion &&
+      nextRoom.phase === "playing"
+    ) {
+      state.selected = [];
+    }
+    state.boardVersion = nextVersion;
+    state.room = nextRoom;
     routeRoomPhase();
   }, () => toast("Oda verisi okunamadı.", true)));
   state.unsubscribers.push(onSnapshot(query(collection(roomRef(), "players"), orderBy("score", "desc")), (snapshot) => {
@@ -266,8 +292,14 @@ function renderLetters() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `letter-tile${state.selected.includes(index) ? " selected" : ""}`;
-    button.textContent = letter;
-    button.ariaLabel = `${letter} harfi`;
+    const glyph = document.createElement("span");
+    glyph.className = "tile-letter";
+    glyph.textContent = letter;
+    const point = document.createElement("small");
+    point.className = "tile-point";
+    point.textContent = letterPoint(letter);
+    button.append(glyph, point);
+    button.ariaLabel = `${letter} harfi, ${letterPoint(letter)} puan`;
     button.addEventListener("pointerdown", (event) => { event.preventDefault(); selectLetter(index); });
     return button;
   }));
@@ -297,14 +329,25 @@ function backspace() { state.selected.pop(); renderLetters(); }
 function clearWord() { state.selected = []; renderLetters(); }
 
 function pointsFor(word) {
-  const length = [...word].length;
-  const base = ({ 2: 40, 3: 100, 4: 180, 5: 300, 6: 460 })[length] ?? (length >= 7 ? 650 + (length - 7) * 100 : 0);
-  return Math.round(base * (1 + Math.min(state.combo, 5) * .1));
+  const letters = [...word.toLocaleUpperCase("tr-TR")];
+  const letterTotal = letters.reduce((total, letter) => total + letterPoint(letter), 0);
+  const lengthMultiplier = letters.length <= 3
+    ? 1
+    : letters.length === 4
+      ? 1.25
+      : letters.length === 5
+        ? 1.5
+        : letters.length === 6
+          ? 1.75
+          : 2;
+  const comboMultiplier = 1 + Math.min(state.combo, 5) * .1;
+  return Math.round(letterTotal * lengthMultiplier * comboMultiplier);
 }
 
 async function submitWord() {
   if (state.submitting) return;
   const displayed = currentWord();
+  const selectedIndexes = [...state.selected];
   const word = normalizeWord(displayed);
   if ([...word].length < 2) { toast("Kelime çok kısa.", true); return; }
   if (!isValidWord(word)) { state.combo = 0; toast("Bu kelime sözlükte yok.", true); vibrate([30, 30, 30]); return; }
@@ -316,10 +359,20 @@ async function submitWord() {
       const currentRoom = await transaction.get(roomRef());
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
       if (currentRoom.data().endsAt.toMillis() <= Date.now()) throw new Error("Süre doldu.");
-      const round = currentRoom.data().round ?? 0;
+      const roomData = currentRoom.data();
+      const liveWord = selectedIndexes.map((index) => roomData.letters[index]).join("");
+      if (normalizeWord(liveWord) !== word) throw new Error("Harfler rakip tarafından değiştirildi.");
+      const round = roomData.round ?? 0;
       const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
+      const nextLetters = [...roomData.letters];
+      for (const index of selectedIndexes) nextLetters[index] = randomLetter();
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
+      transaction.update(roomRef(), {
+        letters: nextLetters,
+        boardVersion: increment(1),
+        updatedAt: serverTimestamp()
+      });
       transaction.update(playerRef(), { score: increment(points), words: increment(1), lastSeenAt: serverTimestamp() });
     });
     state.combo += 1;
@@ -364,7 +417,7 @@ async function startMatch() {
   const players = state.players.map(currentRoundPlayer);
   if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
   await updateDoc(roomRef(), {
-    phase: "playing", letters: createLetters(), endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
+    phase: "playing", letters: createLetters(), boardVersion: increment(1), endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
   });
   track("match_start", { players: state.players.length });
 }
@@ -408,7 +461,7 @@ function leaveListeners() {
 async function leaveRoom() {
   if (state.roomCode && state.uid) await updateDoc(playerRef(), { connected: false, lastSeenAt: serverTimestamp() }).catch(() => {});
   leaveListeners();
-  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false });
+  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null });
   showScreen("homeScreen");
 }
 
