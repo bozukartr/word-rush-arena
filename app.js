@@ -12,6 +12,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
 import { isValidWord, loadDictionary, normalizeWord, randomSeedWord } from "./words.js";
+import {
+  acceptedWord, attackFlash, celebrate, comboPop, enterScreen, haptic, initEffects,
+  invalidWord, isSoundEnabled, pressTile, purchaseFx, setSound, timerPulse
+} from "./effects.js";
 
 const app = initializeApp(firebaseConfig);
 if (appCheckSiteKey) {
@@ -34,7 +38,7 @@ if (emulatorMode) {
 }
 
 const $ = (id) => document.getElementById(id);
-const screens = ["loadingScreen", "homeScreen", "profileScreen", "lobbyScreen", "gameScreen", "resultsScreen"];
+const screens = ["loadingScreen", "homeScreen", "marketScreen", "profileScreen", "lobbyScreen", "gameScreen", "resultsScreen"];
 const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
@@ -43,6 +47,8 @@ const ui = Object.fromEntries([
   "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "logoutButton",
   "quickMatchButton", "quickMatchStatus", "profileName", "profileCode", "profileCoins", "profileDiamonds",
   "friendCodeInput", "addFriendButton", "friendList", "friendRequests", "profileBackButton",
+  "effectsCanvas", "bottomNav", "navPlay", "navMarket", "navProfile", "marketGrid", "marketBackButton",
+  "marketCoins", "marketDiamonds", "soundToggle",
   "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
@@ -62,9 +68,14 @@ const LETTER_STOCK = Object.freeze({
   Y: 3, Z: 2
 });
 const VOWELS = new Set(["A", "E", "I", "İ", "O", "Ö", "U", "Ü"]);
-const ATTACK_COST = 25;
 const ATTACK_DURATION_MS = 8000;
 const ROUND_GRACE_MS = 2000;
+const MARKET_ITEMS = Object.freeze([
+  { id: "a_lock", title: "A Kilidi", description: "Rakibin A taşlarını 8 sn kilitler", icon: "A×", currency: "coins", price: 25, kind: "consumable" },
+  { id: "aurora", title: "Aurora", description: "Canlı mor ve turkuaz taş teması", icon: "◇", currency: "diamonds", price: 3, kind: "theme" },
+  { id: "obsidian", title: "Obsidian", description: "Koyu cam ve kırmızı parıltı", icon: "◆", currency: "diamonds", price: 5, kind: "theme" },
+  { id: "royal", title: "Royal Gold", description: "Altın kenarlı premium taşlar", icon: "★", currency: "diamonds", price: 8, kind: "theme" }
+]);
 
 function letterPoint(letter) {
   return LETTER_POINTS[letter.toLocaleUpperCase("tr-TR")] ?? 1;
@@ -121,6 +132,9 @@ const state = {
   diamonds: 0,
   wins: 0,
   profile: null,
+  inventory: { a_lock: 0 },
+  ownedThemes: ["default"],
+  activeTheme: "default",
   friendships: [],
   quickMatching: false,
   quickStarting: false,
@@ -129,6 +143,8 @@ const state = {
   blockedActive: false,
   rewarding: false,
   finishing: false,
+  celebratedRound: null,
+  lastTimerSecond: null,
   profileUnsubscriber: null,
   friendsUnsubscriber: null,
   unsubscribers: [],
@@ -140,6 +156,13 @@ const state = {
 function showScreen(id) {
   for (const screen of screens) $(screen).classList.toggle("active", screen === id);
   ui.leaveButton.classList.toggle("hidden", !state.roomCode);
+  const socialScreen = ["homeScreen", "marketScreen", "profileScreen"].includes(id);
+  ui.bottomNav.classList.toggle("hidden", !socialScreen || !state.uid);
+  ui.navPlay.classList.toggle("active", id === "homeScreen");
+  ui.navMarket.classList.toggle("active", id === "marketScreen");
+  ui.navProfile.classList.toggle("active", id === "profileScreen");
+  enterScreen($(id));
+  if (id === "marketScreen") renderMarket();
 }
 
 function setConnection(mode, text) {
@@ -169,7 +192,8 @@ async function ensureProfile(user = auth.currentUser) {
     const snapshot = await transaction.get(ref);
     if (!snapshot.exists()) {
       transaction.set(ref, {
-        coins: 0, diamonds: 0, wins: 0, lastAction: null, friendCode,
+        coins: 0, diamonds: 0, wins: 0, inventory: { a_lock: 0 },
+        ownedThemes: ["default"], activeTheme: "default", lastAction: null, friendCode,
         displayName: user.displayName ?? "Oyuncu", photoURL: user.photoURL ?? "",
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
@@ -180,6 +204,9 @@ async function ensureProfile(user = auth.currentUser) {
         friendCode: snapshot.data().friendCode ?? friendCode,
         diamonds: snapshot.data().diamonds ?? 0,
         wins: snapshot.data().wins ?? 0,
+        inventory: snapshot.data().inventory ?? { a_lock: 0 },
+        ownedThemes: snapshot.data().ownedThemes ?? ["default"],
+        activeTheme: snapshot.data().activeTheme ?? "default",
         updatedAt: serverTimestamp()
       });
     }
@@ -196,17 +223,24 @@ async function ensureProfile(user = auth.currentUser) {
     state.coins = state.profile?.coins ?? 0;
     state.diamonds = state.profile?.diamonds ?? 0;
     state.wins = state.profile?.wins ?? 0;
+    state.inventory = state.profile?.inventory ?? { a_lock: 0 };
+    state.ownedThemes = state.profile?.ownedThemes ?? ["default"];
+    state.activeTheme = state.profile?.activeTheme ?? "default";
+    document.documentElement.dataset.theme = state.activeTheme;
     ui.coinText.textContent = state.coins;
     ui.diamondText.textContent = state.diamonds;
     ui.profileName.textContent = state.profile?.displayName ?? "Oyuncu";
     ui.profileCode.textContent = state.profile?.friendCode ?? friendCode;
     ui.profileCoins.textContent = state.coins;
     ui.profileDiamonds.textContent = state.diamonds;
+    ui.marketCoins.textContent = state.coins;
+    ui.marketDiamonds.textContent = state.diamonds;
     ui.profileAvatar.src = state.profile?.photoURL || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' rx='40' fill='%237c63ff'/%3E%3Ctext x='40' y='52' text-anchor='middle' fill='white' font-size='34'%3EW%3C/text%3E%3C/svg%3E";
     ui.coinBadge.classList.remove("hidden");
     ui.diamondBadge.classList.remove("hidden");
     ui.profileButton.classList.remove("hidden");
     renderAttackButton();
+    renderMarket();
   });
   subscribeFriendships();
 }
@@ -281,6 +315,73 @@ async function addFriend() {
 async function acceptFriend(id) {
   await updateDoc(doc(db, "friendships", id), { status: "accepted", updatedAt: serverTimestamp() });
   toast("Arkadaş eklendi.");
+}
+
+function renderMarket() {
+  if (!ui.marketGrid) return;
+  ui.marketCoins.textContent = state.coins;
+  ui.marketDiamonds.textContent = state.diamonds;
+  ui.marketGrid.replaceChildren(...MARKET_ITEMS.map((item) => {
+    const card = document.createElement("article");
+    card.className = `market-card ${item.kind}`;
+    card.dataset.item = item.id;
+    const owned = item.kind === "theme" && state.ownedThemes.includes(item.id);
+    const equipped = item.kind === "theme" && state.activeTheme === item.id;
+    const amount = item.kind === "consumable" ? (state.inventory[item.id] ?? 0) : 0;
+    card.innerHTML = `<div class="market-icon"></div><div class="market-copy"><strong></strong><span></span></div><div class="market-owned"></div><button type="button"></button>`;
+    card.querySelector(".market-icon").textContent = item.icon;
+    card.querySelector(".market-copy strong").textContent = item.title;
+    card.querySelector(".market-copy span").textContent = item.description;
+    card.querySelector(".market-owned").textContent = item.kind === "consumable" ? `x${amount}` : (equipped ? "KUŞANILDI" : (owned ? "SAHİP" : ""));
+    const button = card.querySelector("button");
+    if (equipped) {
+      button.textContent = "AKTİF";
+      button.disabled = true;
+    } else if (owned) {
+      button.textContent = "KUŞAN";
+      button.addEventListener("click", () => equipTheme(item, card));
+    } else {
+      const balance = item.currency === "coins" ? state.coins : state.diamonds;
+      const missing = Math.max(0, item.price - balance);
+      button.textContent = missing ? `${missing} EKSİK` : `${item.currency === "coins" ? "◆" : "◇"} ${item.price}`;
+      button.disabled = missing > 0;
+      button.addEventListener("click", () => buyMarketItem(item, card));
+    }
+    return card;
+  }));
+}
+
+async function buyMarketItem(item, card) {
+  try {
+    await runTransaction(db, async (transaction) => {
+      const profile = await transaction.get(profileRef());
+      if (!profile.exists()) throw new Error("Profil bulunamadı.");
+      const data = profile.data();
+      const balance = item.currency === "coins" ? (data.coins ?? 0) : (data.diamonds ?? 0);
+      if (balance < item.price) throw new Error("Yetersiz bakiye.");
+      const update = {
+        lastAction: { type: "market", itemId: item.id, currency: item.currency, price: item.price },
+        updatedAt: serverTimestamp()
+      };
+      if (item.currency === "coins") update.coins = increment(-item.price);
+      else update.diamonds = increment(-item.price);
+      if (item.kind === "consumable") {
+        update.inventory = { ...(data.inventory ?? { a_lock: 0 }), [item.id]: (data.inventory?.[item.id] ?? 0) + 1 };
+      } else {
+        if ((data.ownedThemes ?? ["default"]).includes(item.id)) throw new Error("Bu tema zaten sende.");
+        update.ownedThemes = [...(data.ownedThemes ?? ["default"]), item.id];
+      }
+      transaction.update(profileRef(), update);
+    });
+    purchaseFx(card.isConnected ? card : ui.marketGrid, item.currency);
+    toast(`${item.title} satın alındı.`);
+  } catch (error) { toast(error.message, true); }
+}
+
+async function equipTheme(item, card) {
+  await updateDoc(profileRef(), { activeTheme: item.id, updatedAt: serverTimestamp() });
+  document.documentElement.dataset.theme = item.id;
+  purchaseFx(card.isConnected ? card : ui.marketGrid, "diamonds");
 }
 
 function setQuickMatchUi(active, text = "") {
@@ -634,6 +735,7 @@ function refreshBlockedLetters(force = false) {
   if (changed && active) {
     state.selected = state.selected.filter((index) => !isLetterBlocked(activeLetters()[index]));
     ui.gameStatus.textContent = "A harflerin kilitlendi";
+    attackFlash();
   } else if (changed && state.room?.phase === "playing") {
     ui.gameStatus.textContent = "Harfleri seç";
   }
@@ -644,13 +746,14 @@ function renderAttackButton() {
   if (!ui.attackButton) return;
   const me = state.players.find((player) => player.uid === state.uid);
   const used = me?.attackUsedRound === (state.room?.round ?? 0);
-  ui.attackButton.textContent = used ? "KULLANILDI" : `A KİLİTLE · ${ATTACK_COST}`;
-  ui.attackButton.disabled = state.room?.phase !== "playing" || used || state.coins < ATTACK_COST;
+  const amount = state.inventory.a_lock ?? 0;
+  ui.attackButton.textContent = used ? "KULLANILDI" : `A KİLİTLE · x${amount}`;
+  ui.attackButton.disabled = state.room?.phase !== "playing" || used || amount < 1;
 }
 
 function openAttackPicker() {
   const me = state.players.find((player) => player.uid === state.uid);
-  if (state.coins < ATTACK_COST) { toast("Yeterli jeton yok.", true); return; }
+  if ((state.inventory.a_lock ?? 0) < 1) { toast("Marketinden A Kilidi almalısın.", true); return; }
   if (me?.attackUsedRound === (state.room?.round ?? 0)) { toast("Bu tur engel kullandın.", true); return; }
   const opponents = state.players.filter((player) => player.uid !== state.uid);
   ui.attackTargets.replaceChildren(...opponents.map((player) => {
@@ -676,10 +779,11 @@ async function useAttack(targetId) {
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
       if (!currentPlayer.exists() || currentPlayer.data().attackUsedRound === round) throw new Error("Bu tur engel kullandın.");
       if (!target.exists() || targetId === state.uid) throw new Error("Hedef bulunamadı.");
-      if (!profile.exists() || (profile.data().coins ?? 0) < ATTACK_COST) throw new Error("Yeterli jeton yok.");
+      if (!profile.exists() || (profile.data().inventory?.a_lock ?? 0) < 1) throw new Error("A Kilidi stoğun yok.");
+      const nextInventory = { ...(profile.data().inventory ?? { a_lock: 0 }), a_lock: (profile.data().inventory?.a_lock ?? 0) - 1 };
       transaction.update(profileRef(), {
-        coins: increment(-ATTACK_COST),
-        lastAction: { type: "attack", roomCode: state.roomCode, round },
+        inventory: nextInventory,
+        lastAction: { type: "power", itemId: "a_lock", roomCode: state.roomCode, round },
         updatedAt: serverTimestamp()
       });
       transaction.update(playerRef(), { attackUsedRound: round, lastSeenAt: serverTimestamp() });
@@ -695,7 +799,7 @@ async function useAttack(targetId) {
     });
     ui.attackPicker.classList.add("hidden");
     toast("Rakibin A harfleri kilitlendi.");
-    vibrate([20, 25, 20]);
+    attackFlash();
   } catch (error) {
     toast(error.message, true);
   }
@@ -726,8 +830,9 @@ function renderLetters() {
 function selectLetter(index) {
   if (state.shuffling || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index) || state.room?.phase !== "playing") return;
   state.selected.push(index);
-  vibrate(8);
+  haptic("tap");
   renderLetters();
+  requestAnimationFrame(() => pressTile(ui.letterGrid.children[index]));
 }
 
 function currentWord() {
@@ -760,7 +865,10 @@ async function shuffleLetters() {
   state.playerLetters = nextLetters;
   ui.shuffleButton.disabled = true;
   renderLetters();
-  vibrate(10);
+  haptic("tap");
+  requestAnimationFrame(() => {
+    for (const tile of ui.letterGrid.children) pressTile(tile);
+  });
   try {
     await updateDoc(playerRef(), {
       letters: nextLetters,
@@ -800,8 +908,8 @@ async function submitWord() {
   const displayed = currentWord();
   const selectedIndexes = [...state.selected];
   const word = normalizeWord(displayed);
-  if ([...word].length < 2) { toast("Kelime çok kısa.", true); return; }
-  if (!isValidWord(word)) { state.combo = 0; toast("Bu kelime sözlükte yok.", true); vibrate([30, 30, 30]); return; }
+  if ([...word].length < 2) { invalidWord(ui.currentWord); toast("Kelime çok kısa.", true); return; }
+  if (!isValidWord(word)) { state.combo = 0; invalidWord(ui.currentWord); toast("Bu kelime sözlükte yok.", true); return; }
   if (!Array.isArray(state.playerBag)) { toast("Harf stoğu hazırlanıyor.", true); return; }
   const submittedAtMs = Date.now();
   const points = pointsFor(word);
@@ -828,7 +936,11 @@ async function submitWord() {
   ui.recentWords.replaceChildren(...state.recentWords.map((item) => { const chip = document.createElement("span"); chip.className = "word-chip"; chip.textContent = item; return chip; }));
   renderLetters();
   renderStock();
-  vibrate(18);
+  requestAnimationFrame(() => {
+    const refillElements = selectedIndexes.map((index) => ui.letterGrid.children[index]).filter(Boolean);
+    acceptedWord(ui.currentWord, points, refillElements);
+    comboPop(ui.comboText, state.combo);
+  });
   try {
     let refreshedLetters = null;
     let refreshedBag = null;
@@ -897,6 +1009,10 @@ function startTimer() {
     const end = state.room?.endsAt?.toMillis?.() ?? 0;
     const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     ui.timerText.textContent = remaining;
+    if (remaining !== state.lastTimerSecond) {
+      state.lastTimerSecond = remaining;
+      timerPulse(ui.timerText, remaining);
+    }
     refreshBlockedLetters();
     if (
       end && Date.now() >= end + ROUND_GRACE_MS &&
@@ -917,7 +1033,7 @@ function startTimer() {
 
 async function toggleReady() {
   await updateDoc(playerRef(), { ready: !state.ready, lastSeenAt: serverTimestamp() });
-  vibrate(10);
+  haptic("tap");
 }
 
 async function maybeStartQuickMatch() {
@@ -935,6 +1051,7 @@ async function startMatch() {
   const players = state.players.map(currentRoundPlayer);
   if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
   state.finishing = false;
+  state.lastTimerSecond = null;
   await updateDoc(roomRef(), {
     phase: "playing", letters: createLetters(), boardVersion: increment(1), winnerId: null,
     endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
@@ -946,6 +1063,11 @@ function renderResults() {
   if (!state.players.length) return;
   const sorted = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score);
   ui.winnerText.textContent = `${sorted[0].name} kazandı!`;
+  const round = state.room?.round ?? 0;
+  if (state.room?.phase === "results" && state.celebratedRound !== round) {
+    state.celebratedRound = round;
+    requestAnimationFrame(() => celebrate(ui.winnerText, state.room?.winnerId === state.uid && (state.wins + 1) % 3 === 0));
+  }
   ui.resultsList.replaceChildren(...sorted.map((player, index) => {
     const row = document.createElement("div");
     row.className = "result-row";
@@ -1032,8 +1154,6 @@ function setBusy(value) {
   ui.joinRoomButton.disabled = value;
 }
 
-function vibrate(pattern) { if (navigator.vibrate) navigator.vibrate(pattern); }
-
 async function googleLogin() {
   try {
     await signInWithPopup(auth, googleProvider);
@@ -1064,6 +1184,14 @@ ui.logoutButton.addEventListener("click", logout);
 ui.quickMatchButton.addEventListener("click", quickMatch);
 ui.profileButton.addEventListener("click", () => showScreen("profileScreen"));
 ui.profileBackButton.addEventListener("click", () => showScreen("homeScreen"));
+ui.marketBackButton.addEventListener("click", () => showScreen("homeScreen"));
+ui.navPlay.addEventListener("click", () => showScreen("homeScreen"));
+ui.navMarket.addEventListener("click", () => showScreen("marketScreen"));
+ui.navProfile.addEventListener("click", () => showScreen("profileScreen"));
+ui.soundToggle.addEventListener("click", () => {
+  const enabled = setSound(!isSoundEnabled());
+  ui.soundToggle.textContent = enabled ? "SES AÇIK" : "SES KAPALI";
+});
 ui.addFriendButton.addEventListener("click", addFriend);
 ui.friendCodeInput.addEventListener("keydown", (event) => { if (event.key === "Enter") addFriend(); });
 ui.roomCodeInput.addEventListener("input", () => { ui.roomCodeInput.value = ui.roomCodeInput.value.replace(/\D/g, "").slice(0, 5); });
@@ -1085,6 +1213,8 @@ window.addEventListener("offline", () => setConnection("offline", "Çevrimdış�
 window.addEventListener("beforeunload", () => { if (state.roomCode) updateDoc(playerRef(), { connected: false }).catch(() => {}); });
 
 ui.playerName.value = localStorage.getItem("wra-player-name") ?? "";
+ui.soundToggle.textContent = isSoundEnabled() ? "SES AÇIK" : "SES KAPALI";
+initEffects(ui.effectsCanvas);
 onAuthStateChanged(auth, async (user) => {
   const signedIn = Boolean(user && !user.isAnonymous);
   ui.googleLoginButton.classList.toggle("hidden", signedIn);
