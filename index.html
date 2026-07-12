@@ -15,7 +15,12 @@
     <header class="brand-bar">
       <button id="leaveButton" class="icon-button hidden" type="button" aria-label="Odadan çık">‹</button>
       <div class="mini-brand"><strong>WRA</strong></div>
-      <div class="header-status"><div id="coinBadge" class="coin-badge hidden">◆ <b id="coinText">0</b></div><div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div></div>
+      <div class="header-status">
+        <div id="diamondBadge" class="diamond-badge hidden">◇ <b id="diamondText">0</b></div>
+        <div id="coinBadge" class="coin-badge hidden">◆ <b id="coinText">0</b></div>
+        <button id="profileButton" class="profile-button hidden" type="button" aria-label="Profil">●</button>
+        <div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div>
+      </div>
     </header>
 
     <section id="loadingScreen" class="screen active loading-screen">
@@ -27,6 +32,9 @@
       <h1>Word Rush</h1>
       <p class="home-subtitle">75 saniyelik kelime düellosu</p>
       <div class="panel home-panel">
+        <button id="googleLoginButton" class="button google-button" type="button"><span>G</span> GOOGLE İLE GİRİŞ</button>
+        <button id="quickMatchButton" class="button button-gold" type="button" disabled>QUICK MATCH</button>
+        <p id="quickMatchStatus" class="quick-match-status"></p>
         <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Oyuncu adı">
         <button id="createRoomButton" class="button button-primary" type="button">ODA KUR</button>
         <div class="separator"><span>veya</span></div>
@@ -35,6 +43,29 @@
           <button id="joinRoomButton" class="button button-secondary" type="button">KATIL</button>
         </div>
       </div>
+    </section>
+
+    <section id="profileScreen" class="screen profile-screen">
+      <div class="profile-head">
+        <button id="profileBackButton" class="icon-button solid" type="button" aria-label="Geri">‹</button>
+        <strong>PROFİL</strong>
+      </div>
+      <div class="profile-card">
+        <img id="profileAvatar" class="profile-avatar" alt="">
+        <h2 id="profileName">Oyuncu</h2>
+        <div class="profile-code">KOD <b id="profileCode">------------</b></div>
+        <div class="profile-wallet">
+          <div><span>◆</span><b id="profileCoins">0</b><small>JETON</small></div>
+          <div class="diamond"><span>◇</span><b id="profileDiamonds">0</b><small>ELMAS</small></div>
+        </div>
+      </div>
+      <div class="friend-add">
+        <input id="friendCodeInput" maxlength="12" autocomplete="off" placeholder="ARKADAŞ KODU">
+        <button id="addFriendButton" type="button">EKLE</button>
+      </div>
+      <div id="friendRequests" class="friend-list requests"></div>
+      <div id="friendList" class="friend-list"></div>
+      <button id="logoutButton" class="text-button hidden" type="button">Çıkış yap</button>
     </section>
 
     <section id="lobbyScreen" class="screen lobby-screen">
