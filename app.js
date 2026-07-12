@@ -1,11 +1,14 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
 import { getAnalytics, isSupported as analyticsSupported, logEvent } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js";
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js";
-import { connectAuthEmulator, getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+import {
+  GoogleAuthProvider, connectAuthEmulator, getAuth, getRedirectResult, onAuthStateChanged,
+  signInWithPopup, signInWithRedirect, signOut
+} from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp, collection, connectFirestoreEmulator, doc, getDoc, getDocs,
   getFirestore, increment, limit, onSnapshot, orderBy, query, runTransaction,
-  serverTimestamp, setDoc, updateDoc
+  serverTimestamp, setDoc, updateDoc, where
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
 import { isValidWord, loadDictionary, normalizeWord, randomSeedWord } from "./words.js";
@@ -20,6 +23,7 @@ if (appCheckSiteKey) {
 
 const auth = getAuth(app);
 const db = getFirestore(app);
+const googleProvider = new GoogleAuthProvider();
 let analytics = null;
 analyticsSupported().then((supported) => { if (supported) analytics = getAnalytics(app); });
 
@@ -30,12 +34,15 @@ if (emulatorMode) {
 }
 
 const $ = (id) => document.getElementById(id);
-const screens = ["loadingScreen", "homeScreen", "lobbyScreen", "gameScreen", "resultsScreen"];
+const screens = ["loadingScreen", "homeScreen", "profileScreen", "lobbyScreen", "gameScreen", "resultsScreen"];
 const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
   "coinBadge", "coinText", "attackButton", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
+  "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "logoutButton",
+  "quickMatchButton", "quickMatchStatus", "profileName", "profileCode", "profileCoins", "profileDiamonds",
+  "friendCodeInput", "addFriendButton", "friendList", "friendRequests", "profileBackButton",
   "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
@@ -111,11 +118,19 @@ const state = {
   playerBag: null,
   boardInitializing: false,
   coins: 0,
+  diamonds: 0,
+  wins: 0,
+  profile: null,
+  friendships: [],
+  quickMatching: false,
+  quickStarting: false,
+  matchmakingUnsubscriber: null,
   effects: [],
   blockedActive: false,
   rewarding: false,
   finishing: false,
   profileUnsubscriber: null,
+  friendsUnsubscriber: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -143,20 +158,220 @@ function track(name, params = {}) {
   if (analytics) logEvent(analytics, name, params);
 }
 
-async function ensureProfile() {
+function friendCodeFor(uid) {
+  return uid.replace(/[^a-z0-9]/gi, "").slice(0, 12).toLocaleUpperCase("tr-TR");
+}
+
+async function ensureProfile(user = auth.currentUser) {
+  const friendCode = friendCodeFor(user.uid);
   await runTransaction(db, async (transaction) => {
     const ref = profileRef();
-    if (!(await transaction.get(ref)).exists()) {
-      transaction.set(ref, { coins: 0, lastAction: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) {
+      transaction.set(ref, {
+        coins: 0, diamonds: 0, wins: 0, lastAction: null, friendCode,
+        displayName: user.displayName ?? "Oyuncu", photoURL: user.photoURL ?? "",
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    } else {
+      transaction.update(ref, {
+        displayName: user.displayName ?? snapshot.data().displayName ?? "Oyuncu",
+        photoURL: user.photoURL ?? snapshot.data().photoURL ?? "",
+        friendCode: snapshot.data().friendCode ?? friendCode,
+        diamonds: snapshot.data().diamonds ?? 0,
+        wins: snapshot.data().wins ?? 0,
+        updatedAt: serverTimestamp()
+      });
     }
   });
+  await setDoc(doc(db, "handles", friendCode), {
+    uid: user.uid,
+    displayName: user.displayName ?? "Oyuncu",
+    photoURL: user.photoURL ?? "",
+    updatedAt: serverTimestamp()
+  }, { merge: true });
   state.profileUnsubscriber?.();
   state.profileUnsubscriber = onSnapshot(profileRef(), (snapshot) => {
-    state.coins = snapshot.data()?.coins ?? 0;
+    state.profile = snapshot.data() ?? null;
+    state.coins = state.profile?.coins ?? 0;
+    state.diamonds = state.profile?.diamonds ?? 0;
+    state.wins = state.profile?.wins ?? 0;
     ui.coinText.textContent = state.coins;
+    ui.diamondText.textContent = state.diamonds;
+    ui.profileName.textContent = state.profile?.displayName ?? "Oyuncu";
+    ui.profileCode.textContent = state.profile?.friendCode ?? friendCode;
+    ui.profileCoins.textContent = state.coins;
+    ui.profileDiamonds.textContent = state.diamonds;
+    ui.profileAvatar.src = state.profile?.photoURL || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' rx='40' fill='%237c63ff'/%3E%3Ctext x='40' y='52' text-anchor='middle' fill='white' font-size='34'%3EW%3C/text%3E%3C/svg%3E";
     ui.coinBadge.classList.remove("hidden");
+    ui.diamondBadge.classList.remove("hidden");
+    ui.profileButton.classList.remove("hidden");
     renderAttackButton();
   });
+  subscribeFriendships();
+}
+
+function friendshipId(uidA, uidB) { return [uidA, uidB].sort().join("_"); }
+
+function subscribeFriendships() {
+  state.friendsUnsubscriber?.();
+  state.friendsUnsubscriber = onSnapshot(
+    query(collection(db, "friendships"), where("members", "array-contains", state.uid)),
+    (snapshot) => {
+      state.friendships = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      renderFriends();
+    }
+  );
+}
+
+function friendIdentity(friendship) {
+  return friendship.people?.find((person) => person.uid !== state.uid) ?? { name: "Oyuncu", photoURL: "" };
+}
+
+function renderFriends() {
+  const accepted = state.friendships.filter((item) => item.status === "accepted");
+  const requests = state.friendships.filter((item) => item.status === "pending" && item.requestedBy !== state.uid);
+  ui.friendList.replaceChildren(...accepted.map((item) => {
+    const person = friendIdentity(item);
+    const row = document.createElement("div");
+    row.className = "friend-row";
+    row.innerHTML = "<span class=\"friend-dot\"></span><strong></strong>";
+    row.querySelector("strong").textContent = person.name;
+    return row;
+  }));
+  ui.friendRequests.replaceChildren(...requests.map((item) => {
+    const person = friendIdentity(item);
+    const row = document.createElement("div");
+    row.className = "friend-row request";
+    const name = document.createElement("strong");
+    name.textContent = person.name;
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.textContent = "KABUL";
+    accept.addEventListener("click", () => acceptFriend(item.id));
+    row.append(name, accept);
+    return row;
+  }));
+}
+
+async function addFriend() {
+  try {
+    const code = ui.friendCodeInput.value.replace(/[^a-z0-9]/gi, "").toLocaleUpperCase("tr-TR");
+    if (code.length < 6) throw new Error("Arkadaş kodunu gir.");
+    const handle = await getDoc(doc(db, "handles", code));
+    if (!handle.exists() || handle.data().uid === state.uid) throw new Error("Oyuncu bulunamadı.");
+    const target = handle.data();
+    const ref = doc(db, "friendships", friendshipId(state.uid, target.uid));
+    await runTransaction(db, async (transaction) => {
+      if ((await transaction.get(ref)).exists()) throw new Error("Arkadaşlık isteği zaten var.");
+      transaction.set(ref, {
+        members: [state.uid, target.uid].sort(),
+        requestedBy: state.uid,
+        status: "pending",
+        people: [
+          { uid: state.uid, name: state.profile?.displayName ?? "Oyuncu", photoURL: state.profile?.photoURL ?? "" },
+          { uid: target.uid, name: target.displayName ?? "Oyuncu", photoURL: target.photoURL ?? "" }
+        ],
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+    });
+    ui.friendCodeInput.value = "";
+    toast("Arkadaşlık isteği gönderildi.");
+  } catch (error) { toast(error.message, true); }
+}
+
+async function acceptFriend(id) {
+  await updateDoc(doc(db, "friendships", id), { status: "accepted", updatedAt: serverTimestamp() });
+  toast("Arkadaş eklendi.");
+}
+
+function setQuickMatchUi(active, text = "") {
+  state.quickMatching = active;
+  ui.quickMatchButton.textContent = active ? "ARAMAYI İPTAL ET" : "QUICK MATCH";
+  ui.quickMatchStatus.textContent = text;
+}
+
+async function joinQuickRoom(code) {
+  if (state.roomCode === code) return;
+  const room = await getDoc(roomRef(code));
+  if (!room.exists()) throw new Error("Eşleşme odası bulunamadı.");
+  await setDoc(playerRef(state.uid, code), {
+    name: state.profile?.displayName ?? auth.currentUser?.displayName ?? "Oyuncu",
+    score: 0, words: 0, round: room.data().round ?? 0, letters: [], letterBag: [],
+    boardVersion: 0, boardRound: -1, attackUsedRound: -1, rewardedRound: -1,
+    ready: true, connected: true, joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
+  }, { merge: true });
+  state.matchmakingUnsubscriber?.();
+  state.matchmakingUnsubscriber = null;
+  setQuickMatchUi(false, "");
+  await enterRoom(code);
+}
+
+function watchMatchmaking() {
+  state.matchmakingUnsubscriber?.();
+  state.matchmakingUnsubscriber = onSnapshot(doc(db, "matchmaking", state.uid), async (snapshot) => {
+    const data = snapshot.data();
+    if (data?.status !== "matched" || !data.roomCode) return;
+    try { await joinQuickRoom(data.roomCode); }
+    catch (error) { toast(error.message, true); setQuickMatchUi(false, ""); }
+  });
+}
+
+async function quickMatch() {
+  if (state.quickMatching) {
+    await updateDoc(doc(db, "matchmaking", state.uid), { status: "cancelled", updatedAt: serverTimestamp() }).catch(() => {});
+    state.matchmakingUnsubscriber?.();
+    state.matchmakingUnsubscriber = null;
+    setQuickMatchUi(false, "");
+    return;
+  }
+  try {
+    setQuickMatchUi(true, "Rakip aranıyor…");
+    const ownQueueRef = doc(db, "matchmaking", state.uid);
+    await setDoc(ownQueueRef, {
+      uid: state.uid,
+      name: state.profile?.displayName ?? "Oyuncu",
+      photoURL: state.profile?.photoURL ?? "",
+      status: "waiting",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    watchMatchmaking();
+    const waiting = await getDocs(query(collection(db, "matchmaking"), where("status", "==", "waiting"), limit(8)));
+    const candidate = waiting.docs.find((item) =>
+      item.id !== state.uid && (item.data().updatedAt?.toMillis?.() ?? 0) > Date.now() - 30000
+    );
+    if (!candidate) return;
+    const code = randomCode();
+    const candidateRef = doc(db, "matchmaking", candidate.id);
+    const roomDocument = roomRef(code);
+    await runTransaction(db, async (transaction) => {
+      const candidateSnapshot = await transaction.get(candidateRef);
+      const roomSnapshot = await transaction.get(roomDocument);
+      if (!candidateSnapshot.exists() || candidateSnapshot.data().status !== "waiting") throw new Error("Rakip başka bir maça katıldı.");
+      if (roomSnapshot.exists()) throw new Error("Eşleşme kodu çakıştı. Tekrar dene.");
+      transaction.set(roomDocument, {
+        hostId: state.uid, phase: "lobby", round: 0, boardVersion: 0, maxPlayers: 2,
+        quickMatch: true, letters: [], endsAt: null, winnerId: null,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+      transaction.set(playerRef(state.uid, code), {
+        name: state.profile?.displayName ?? "Oyuncu", score: 0, words: 0, round: 0,
+        letters: [], letterBag: [], boardVersion: 0, boardRound: -1,
+        attackUsedRound: -1, rewardedRound: -1, ready: true, connected: true,
+        joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
+      });
+      transaction.update(candidateRef, { status: "matched", roomCode: code, matchedBy: state.uid, updatedAt: serverTimestamp() });
+      transaction.update(ownQueueRef, { status: "matched", roomCode: code, matchedBy: state.uid, updatedAt: serverTimestamp() });
+    });
+    await joinQuickRoom(code);
+  } catch (error) {
+    if (state.quickMatching && /başka bir maça|kodu çakıştı/.test(error.message)) {
+      ui.quickMatchStatus.textContent = "Rakip aranıyor…";
+    } else {
+      setQuickMatchUi(false, "");
+      toast(error.message, true);
+    }
+  }
 }
 
 function cleanName() {
@@ -288,6 +503,7 @@ async function enterRoom(code) {
     renderAttackButton();
     renderResults();
     if (state.room?.phase === "playing") ensurePlayerBoard();
+    maybeStartQuickMatch();
   }));
   state.unsubscribers.push(onSnapshot(collection(roomRef(), "effects"), (snapshot) => {
     state.effects = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -706,6 +922,17 @@ async function toggleReady() {
   vibrate(10);
 }
 
+async function maybeStartQuickMatch() {
+  if (
+    state.quickStarting || !state.room?.quickMatch || state.room.phase !== "lobby" ||
+    state.room.hostId !== state.uid || state.players.length !== 2 ||
+    state.players.some((player) => !player.ready)
+  ) return;
+  state.quickStarting = true;
+  try { await startMatch(); }
+  finally { state.quickStarting = false; }
+}
+
 async function startMatch() {
   const players = state.players.map(currentRoundPlayer);
   if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
@@ -743,16 +970,23 @@ async function awardRound() {
       if (!currentRoom.exists() || currentRoom.data().phase !== "results" || !currentPlayer.exists() || !profile.exists()) return 0;
       const round = currentRoom.data().round ?? 0;
       if (currentPlayer.data().rewardedRound === round) return 0;
-      const amount = currentRoom.data().winnerId === state.uid ? 40 : 5;
+      const isWinner = currentRoom.data().winnerId === state.uid;
+      const amount = isWinner ? 40 : 5;
+      const nextWins = (profile.data().wins ?? 0) + (isWinner ? 1 : 0);
+      const diamonds = isWinner && nextWins % 3 === 0 ? 1 : 0;
       transaction.update(profileRef(), {
         coins: increment(amount),
+        wins: increment(isWinner ? 1 : 0),
+        diamonds: increment(diamonds),
         lastAction: { type: "reward", roomCode: state.roomCode, round },
         updatedAt: serverTimestamp()
       });
       transaction.update(playerRef(), { rewardedRound: round, lastSeenAt: serverTimestamp() });
-      return amount;
+      return { coins: amount, diamonds };
     });
-    if (reward > 0) ui.rewardText.textContent = `+${reward} JETON`;
+    if (reward?.coins > 0) {
+      ui.rewardText.textContent = `+${reward.coins} JETON${reward.diamonds ? ` · +${reward.diamonds} ELMAS` : ""}`;
+    }
   } catch (error) {
     ui.rewardText.textContent = "";
   } finally {
@@ -802,8 +1036,38 @@ function setBusy(value) {
 
 function vibrate(pattern) { if (navigator.vibrate) navigator.vibrate(pattern); }
 
+async function googleLogin() {
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (error) {
+    if (["auth/popup-blocked", "auth/cancelled-popup-request", "auth/operation-not-supported-in-this-environment"].includes(error.code)) {
+      await signInWithRedirect(auth, googleProvider);
+      return;
+    }
+    toast("Google girişi açılamadı.", true);
+  }
+}
+
+async function logout() {
+  if (state.roomCode) await leaveRoom();
+  if (state.quickMatching && state.uid) {
+    await updateDoc(doc(db, "matchmaking", state.uid), { status: "cancelled", updatedAt: serverTimestamp() }).catch(() => {});
+  }
+  state.profileUnsubscriber?.();
+  state.friendsUnsubscriber?.();
+  state.matchmakingUnsubscriber?.();
+  await signOut(auth);
+}
+
 ui.createRoomButton.addEventListener("click", createRoom);
 ui.joinRoomButton.addEventListener("click", joinRoom);
+ui.googleLoginButton.addEventListener("click", googleLogin);
+ui.logoutButton.addEventListener("click", logout);
+ui.quickMatchButton.addEventListener("click", quickMatch);
+ui.profileButton.addEventListener("click", () => showScreen("profileScreen"));
+ui.profileBackButton.addEventListener("click", () => showScreen("homeScreen"));
+ui.addFriendButton.addEventListener("click", addFriend);
+ui.friendCodeInput.addEventListener("keydown", (event) => { if (event.key === "Enter") addFriend(); });
 ui.roomCodeInput.addEventListener("input", () => { ui.roomCodeInput.value = ui.roomCodeInput.value.replace(/\D/g, "").slice(0, 5); });
 ui.roomCodeInput.addEventListener("keydown", (event) => { if (event.key === "Enter") joinRoom(); });
 ui.copyCodeButton.addEventListener("click", copyCode);
@@ -824,19 +1088,31 @@ window.addEventListener("beforeunload", () => { if (state.roomCode) updateDoc(pl
 
 ui.playerName.value = localStorage.getItem("wra-player-name") ?? "";
 onAuthStateChanged(auth, async (user) => {
-  if (!user) return;
+  const signedIn = Boolean(user && !user.isAnonymous);
+  ui.googleLoginButton.classList.toggle("hidden", signedIn);
+  ui.logoutButton.classList.toggle("hidden", !signedIn);
+  ui.createRoomButton.disabled = !signedIn;
+  ui.joinRoomButton.disabled = !signedIn;
+  ui.quickMatchButton.disabled = !signedIn;
+  if (!signedIn) {
+    state.uid = null;
+    ui.coinBadge.classList.add("hidden");
+    ui.diamondBadge.classList.add("hidden");
+    ui.profileButton.classList.add("hidden");
+    setConnection("offline", "Giriş gerekli");
+    showScreen("homeScreen");
+    return;
+  }
   state.uid = user.uid;
   try {
     await dictionaryReady;
-    await ensureProfile();
+    await ensureProfile(user);
   }
   catch (error) { toast(error.message, true); return; }
+  ui.playerName.value = user.displayName ?? localStorage.getItem("wra-player-name") ?? "";
   setConnection("online", "Çevrimiçi");
   showScreen("homeScreen");
   track("app_ready");
 });
 
-signInAnonymously(auth).catch((error) => {
-  setConnection("offline", "Bağlantı hatası");
-  toast(`Firebase giriş hatası: ${error.code ?? error.message}`, true);
-});
+getRedirectResult(auth).catch(() => toast("Google giriş yönlendirmesi tamamlanamadı.", true));
