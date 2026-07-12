@@ -34,7 +34,7 @@ const screens = ["loadingScreen", "homeScreen", "lobbyScreen", "gameScreen", "re
 const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
-  "timerText", "scoreStrip", "rankText", "gameStatus", "comboText", "letterGrid", "currentWord",
+  "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
   "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
@@ -47,14 +47,28 @@ const LETTER_POINTS = Object.freeze({
   Ö: 7, P: 5, R: 1, S: 2, Ş: 4, T: 1, U: 2, Ü: 3, V: 7,
   Y: 5, Z: 4
 });
-const LETTER_POOL = "AAAAABCDEEEFGĞHIIİJKLMNOÖPRSTUÜVYZ";
+const LETTER_STOCK = Object.freeze({
+  A: 13, B: 2, C: 2, Ç: 2, D: 2, E: 8, F: 1, G: 1, Ğ: 1,
+  H: 1, I: 4, İ: 7, J: 1, K: 7, L: 7, M: 4, N: 5, O: 3,
+  Ö: 1, P: 1, R: 6, S: 3, Ş: 2, T: 5, U: 3, Ü: 2, V: 1,
+  Y: 3, Z: 2
+});
 
 function letterPoint(letter) {
   return LETTER_POINTS[letter.toLocaleUpperCase("tr-TR")] ?? 1;
 }
 
-function randomLetter() {
-  return LETTER_POOL[Math.floor(Math.random() * LETTER_POOL.length)];
+function createFullLetterBag() {
+  return shuffle(Object.entries(LETTER_STOCK).flatMap(([letter, count]) => Array(count).fill(letter)));
+}
+
+function createLetterBag(usedLetters = []) {
+  const bag = createFullLetterBag();
+  for (const letter of usedLetters) {
+    const index = bag.indexOf(letter);
+    if (index >= 0) bag.splice(index, 1);
+  }
+  return shuffle(bag);
 }
 
 const state = {
@@ -70,6 +84,8 @@ const state = {
   ready: false,
   boardVersion: null,
   playerLetters: [],
+  playerBag: null,
+  boardInitializing: false,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -127,10 +143,15 @@ function shuffle(items) {
 }
 
 function createLetters() {
+  const bag = createFullLetterBag();
   const seed = randomSeedWord();
-  const letters = [...seed.toLocaleUpperCase("tr-TR")];
-  while (letters.length < 12) letters.push(randomLetter());
-  return shuffle(letters.slice(0, 12));
+  const letters = [];
+  for (const letter of [...seed.toLocaleUpperCase("tr-TR")]) {
+    const index = bag.indexOf(letter);
+    if (index >= 0 && letters.length < 12) letters.push(...bag.splice(index, 1));
+  }
+  while (letters.length < 12) letters.push(bag.pop());
+  return shuffle(letters);
 }
 
 async function createRoom() {
@@ -148,7 +169,7 @@ async function createRoom() {
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         transaction.set(playerRef(state.uid, candidate), {
-          name, score: 0, words: 0, round: 0, letters: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
+          name, score: 0, words: 0, round: 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
           joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
         });
         return true;
@@ -174,7 +195,7 @@ async function joinRoom() {
     const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
     if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
     await setDoc(playerRef(state.uid, code), {
-      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
+      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
       joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
     }, { merge: true });
     track("room_join");
@@ -190,6 +211,8 @@ async function enterRoom(code) {
   state.recentWords = [];
   state.boardVersion = null;
   state.playerLetters = [];
+  state.playerBag = null;
+  state.boardInitializing = false;
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
@@ -204,9 +227,12 @@ async function enterRoom(code) {
     if (state.boardVersion !== null && nextBoardVersion !== state.boardVersion) state.selected = [];
     state.boardVersion = nextBoardVersion;
     state.playerLetters = me?.boardRound === (state.room?.round ?? 0) ? (me?.letters ?? []) : [];
+    state.playerBag = me?.boardRound === (state.room?.round ?? 0) && Array.isArray(me?.letterBag) ? me.letterBag : null;
     renderPlayers();
     renderScores();
+    renderStock();
     renderResults();
+    if (state.room?.phase === "playing") ensurePlayerBoard();
   }));
   clearInterval(state.heartbeat);
   state.heartbeat = setInterval(() => updateDoc(playerRef(), { connected: true, lastSeenAt: serverTimestamp() }).catch(() => {}), 20000);
@@ -288,17 +314,31 @@ function renderScores() {
 async function ensurePlayerBoard() {
   const me = state.players.find((player) => player.uid === state.uid);
   const round = state.room?.round ?? 0;
-  if (!me || me.boardRound === round || !(state.room?.letters?.length)) return;
-  await updateDoc(playerRef(), {
-    letters: state.room.letters,
-    boardRound: round,
-    boardVersion: state.room.boardVersion ?? 0,
-    lastSeenAt: serverTimestamp()
-  }).catch(() => {});
+  if (state.boardInitializing || !me || !(state.room?.letters?.length)) return;
+  if (me.boardRound === round && Array.isArray(me.letterBag)) return;
+  const letters = me.boardRound === round && me.letters?.length ? me.letters : state.room.letters;
+  state.boardInitializing = true;
+  try {
+    await updateDoc(playerRef(), {
+      letters,
+      letterBag: createLetterBag(letters),
+      boardRound: round,
+      boardVersion: state.room.boardVersion ?? 0,
+      lastSeenAt: serverTimestamp()
+    });
+  } catch (error) {
+    toast("Harf stoğu hazırlanamadı.", true);
+  } finally {
+    state.boardInitializing = false;
+  }
 }
 
 function activeLetters() {
   return state.playerLetters.length ? state.playerLetters : (state.room?.letters ?? []);
+}
+
+function renderStock() {
+  ui.stockText.textContent = `KALAN ${Array.isArray(state.playerBag) ? state.playerBag.length : "–"}`;
 }
 
 function renderLetters() {
@@ -312,9 +352,10 @@ function renderLetters() {
     glyph.textContent = letter;
     const point = document.createElement("small");
     point.className = "tile-point";
-    point.textContent = letterPoint(letter);
+    point.textContent = letter ? letterPoint(letter) : "";
     button.append(glyph, point);
-    button.ariaLabel = `${letter} harfi, ${letterPoint(letter)} puan`;
+    button.disabled = !letter;
+    button.ariaLabel = letter ? `${letter} harfi, ${letterPoint(letter)} puan` : "Boş harf yuvası";
     button.addEventListener("pointerdown", (event) => { event.preventDefault(); selectLetter(index); });
     return button;
   }));
@@ -322,7 +363,7 @@ function renderLetters() {
 }
 
 function selectLetter(index) {
-  if (state.shuffling || state.selected.includes(index) || state.room?.phase !== "playing") return;
+  if (state.shuffling || !activeLetters()[index] || state.selected.includes(index) || state.room?.phase !== "playing") return;
   state.selected.push(index);
   vibrate(8);
   renderLetters();
@@ -405,6 +446,7 @@ async function submitWord() {
   try {
     const points = pointsFor(word);
     let refreshedLetters = null;
+    let refreshedBag = null;
     await runTransaction(db, async (transaction) => {
       const currentRoom = await transaction.get(roomRef());
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
@@ -416,17 +458,22 @@ async function submitWord() {
       const liveLetters = playerData.boardRound === (roomData.round ?? 0)
         ? playerData.letters
         : roomData.letters;
+      const liveBag = Array.isArray(playerData.letterBag)
+        ? [...playerData.letterBag]
+        : createLetterBag(liveLetters);
       const liveWord = selectedIndexes.map((index) => liveLetters[index]).join("");
       if (normalizeWord(liveWord) !== word) throw new Error("Harfler yenilendi, tekrar seç.");
       const round = roomData.round ?? 0;
       const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
       const nextLetters = [...liveLetters];
-      for (const index of selectedIndexes) nextLetters[index] = randomLetter();
+      for (const index of selectedIndexes) nextLetters[index] = liveBag.pop() ?? "";
       refreshedLetters = nextLetters;
+      refreshedBag = liveBag;
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
       transaction.update(playerRef(), {
         letters: nextLetters,
+        letterBag: liveBag,
         boardRound: round,
         boardVersion: increment(1),
         score: increment(points),
@@ -435,9 +482,11 @@ async function submitWord() {
       });
     });
     state.playerLetters = refreshedLetters ?? state.playerLetters;
+    state.playerBag = refreshedBag ?? state.playerBag;
     state.boardVersion = (state.boardVersion ?? 0) + 1;
     state.selected = [];
     renderLetters();
+    renderStock();
     state.combo += 1;
     state.recentWords.unshift(word);
     state.recentWords = state.recentWords.slice(0, 6);
@@ -523,7 +572,7 @@ function leaveListeners() {
 async function leaveRoom() {
   if (state.roomCode && state.uid) await updateDoc(playerRef(), { connected: false, lastSeenAt: serverTimestamp() }).catch(() => {});
   leaveListeners();
-  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null, playerLetters: [] });
+  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false });
   showScreen("homeScreen");
 }
 
