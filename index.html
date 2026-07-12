@@ -10,6 +10,7 @@
   <title>Word Rush Arena</title>
 </head>
 <body>
+  <canvas id="effectsCanvas" class="effects-canvas" aria-hidden="true"></canvas>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
   <main class="app-shell">
     <header class="brand-bar">
@@ -45,6 +46,19 @@
       </div>
     </section>
 
+    <section id="marketScreen" class="screen market-screen">
+      <div class="market-head">
+        <button id="marketBackButton" class="icon-button solid" type="button" aria-label="Geri">‹</button>
+        <div><span>MAĞAZA</span><strong>MARKET</strong></div>
+        <div class="market-wallet"><span>◆ <b id="marketCoins">0</b></span><span class="diamond">◇ <b id="marketDiamonds">0</b></span></div>
+      </div>
+      <div class="market-hero">
+        <div><span>GÜNÜN SEÇİMİ</span><strong>Tarzını kuşan.<br>Avantajını hazırla.</strong></div>
+        <i>◇</i>
+      </div>
+      <div id="marketGrid" class="market-grid"></div>
+    </section>
+
     <section id="profileScreen" class="screen profile-screen">
       <div class="profile-head">
         <button id="profileBackButton" class="icon-button solid" type="button" aria-label="Geri">‹</button>
@@ -65,6 +79,7 @@
       </div>
       <div id="friendRequests" class="friend-list requests"></div>
       <div id="friendList" class="friend-list"></div>
+      <button id="soundToggle" class="text-button" type="button">SES AÇIK</button>
       <button id="logoutButton" class="text-button hidden" type="button">Çıkış yap</button>
     </section>
 
@@ -120,6 +135,11 @@
       <button id="homeButton" class="text-button" type="button">Ana menü</button>
     </section>
   </main>
+  <nav id="bottomNav" class="bottom-nav hidden" aria-label="Ana navigasyon">
+    <button id="navPlay" type="button"><i>▶</i><span>OYNA</span></button>
+    <button id="navMarket" type="button"><i>◇</i><span>MARKET</span></button>
+    <button id="navProfile" type="button"><i>●</i><span>PROFİL</span></button>
+  </nav>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>
