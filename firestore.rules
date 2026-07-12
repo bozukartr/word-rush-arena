@@ -32,6 +32,9 @@ service cloud.firestore {
       let playerBefore = get(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
       let playerAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
       let reward = room.winnerId == uid ? 40 : 5;
+      let winIncrement = room.winnerId == uid ? 1 : 0;
+      let nextWins = resource.data.get('wins', 0) + winIncrement;
+      let diamondIncrement = room.winnerId == uid && nextWins % 3 == 0 ? 1 : 0;
       return action.type == 'reward'
         && action.roomCode is string
         && action.round is int
@@ -39,7 +42,9 @@ service cloud.firestore {
         && room.round == round
         && playerBefore.get('rewardedRound', -1) != round
         && playerAfter.rewardedRound == round
-        && request.resource.data.coins == resource.data.coins + reward;
+        && request.resource.data.coins == resource.data.coins + reward
+        && request.resource.data.wins == nextWins
+        && request.resource.data.diamonds == resource.data.get('diamonds', 0) + diamondIncrement;
     }
 
     match /rooms/{code} {
@@ -99,15 +104,77 @@ service cloud.firestore {
       allow read: if signedIn() && request.auth.uid == uid;
       allow create: if signedIn() && request.auth.uid == uid
         && request.resource.data.coins == 0
-        && request.resource.data.lastAction == null;
+        && request.resource.data.diamonds == 0
+        && request.resource.data.wins == 0
+        && request.resource.data.lastAction == null
+        && request.resource.data.friendCode is string;
       allow update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins', 'lastAction', 'updatedAt'])
-        && request.resource.data.coins is int
-        && request.resource.data.coins >= 0
-        && request.resource.data.coins <= 100000
-        && request.resource.data.lastAction is map
-        && (validAttackPurchase(uid) || validRoundReward(uid));
+        && (
+          (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['displayName', 'photoURL', 'friendCode', 'diamonds', 'wins', 'updatedAt'])
+            && request.resource.data.displayName is string
+            && request.resource.data.friendCode is string
+            && request.resource.data.diamonds == resource.data.get('diamonds', 0)
+            && request.resource.data.wins == resource.data.get('wins', 0)
+          ) || (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['coins', 'diamonds', 'wins', 'lastAction', 'updatedAt'])
+            && request.resource.data.coins is int
+            && request.resource.data.coins >= 0
+            && request.resource.data.coins <= 100000
+            && request.resource.data.diamonds is int
+            && request.resource.data.diamonds >= 0
+            && request.resource.data.wins is int
+            && request.resource.data.wins >= 0
+            && request.resource.data.lastAction is map
+            && (validAttackPurchase(uid) || validRoundReward(uid))
+          )
+        );
       allow delete: if false;
+    }
+
+    match /handles/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /friendships/{friendshipId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn()
+        && request.auth.uid == request.resource.data.requestedBy
+        && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() == 2
+        && request.resource.data.status == 'pending';
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && request.auth.uid != resource.data.requestedBy
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if signedIn() && request.auth.uid in resource.data.members;
+    }
+
+    match /matchmaking/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if signedIn() && (
+        request.auth.uid == uid || (
+          resource.data.status == 'waiting'
+          && request.resource.data.status == 'matched'
+          && request.resource.data.matchedBy == request.auth.uid
+          && request.resource.data.roomCode is string
+          && existsAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomCode))
+          && getAfter(/databases/$(database)/documents/rooms/$(request.resource.data.roomCode)).data.hostId == request.auth.uid
+        )
+      );
+      allow delete: if signedIn() && request.auth.uid == uid;
     }
 
     match /{document=**} { allow read, write: if false; }
