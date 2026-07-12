@@ -35,7 +35,7 @@ const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "comboText", "letterGrid", "currentWord",
-  "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
+  "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
 
@@ -66,6 +66,7 @@ const state = {
   recentWords: [],
   combo: 0,
   submitting: false,
+  shuffling: false,
   ready: false,
   boardVersion: null,
   playerLetters: [],
@@ -321,7 +322,7 @@ function renderLetters() {
 }
 
 function selectLetter(index) {
-  if (state.selected.includes(index) || state.room?.phase !== "playing") return;
+  if (state.shuffling || state.selected.includes(index) || state.room?.phase !== "playing") return;
   state.selected.push(index);
   vibrate(8);
   renderLetters();
@@ -337,11 +338,44 @@ function renderCurrentWord() {
   ui.currentWord.textContent = "";
   if (word) ui.currentWord.textContent = word;
   else ui.currentWord.innerHTML = "<span>Harfleri seç</span>";
-  ui.submitWordButton.disabled = !word || state.submitting;
+  ui.submitWordButton.disabled = !word || state.submitting || state.shuffling;
+  ui.shuffleButton.disabled = state.submitting || state.shuffling;
 }
 
 function backspace() { state.selected.pop(); renderLetters(); }
 function clearWord() { state.selected = []; renderLetters(); }
+
+async function shuffleLetters() {
+  if (state.shuffling || state.submitting || state.room?.phase !== "playing") return;
+  const previousLetters = [...activeLetters()];
+  if (previousLetters.length < 2) return;
+  let nextLetters = shuffle(previousLetters);
+  if (nextLetters.every((letter, index) => letter === previousLetters[index])) {
+    nextLetters = [...previousLetters.slice(1), previousLetters[0]];
+  }
+  state.shuffling = true;
+  state.selected = [];
+  state.playerLetters = nextLetters;
+  ui.shuffleButton.disabled = true;
+  renderLetters();
+  vibrate(10);
+  try {
+    await updateDoc(playerRef(), {
+      letters: nextLetters,
+      boardRound: state.room.round ?? 0,
+      boardVersion: increment(1),
+      lastSeenAt: serverTimestamp()
+    });
+    state.boardVersion = (state.boardVersion ?? 0) + 1;
+  } catch (error) {
+    state.playerLetters = previousLetters;
+    renderLetters();
+    toast("Harfler karıştırılamadı.", true);
+  } finally {
+    state.shuffling = false;
+    ui.shuffleButton.disabled = false;
+  }
+}
 
 function pointsFor(word) {
   const letters = [...word.toLocaleUpperCase("tr-TR")];
@@ -360,7 +394,7 @@ function pointsFor(word) {
 }
 
 async function submitWord() {
-  if (state.submitting) return;
+  if (state.submitting || state.shuffling) return;
   const displayed = currentWord();
   const selectedIndexes = [...state.selected];
   const word = normalizeWord(displayed);
@@ -370,6 +404,7 @@ async function submitWord() {
   renderCurrentWord();
   try {
     const points = pointsFor(word);
+    let refreshedLetters = null;
     await runTransaction(db, async (transaction) => {
       const currentRoom = await transaction.get(roomRef());
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
@@ -388,6 +423,7 @@ async function submitWord() {
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
       const nextLetters = [...liveLetters];
       for (const index of selectedIndexes) nextLetters[index] = randomLetter();
+      refreshedLetters = nextLetters;
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
       transaction.update(playerRef(), {
         letters: nextLetters,
@@ -398,6 +434,10 @@ async function submitWord() {
         lastSeenAt: serverTimestamp()
       });
     });
+    state.playerLetters = refreshedLetters ?? state.playerLetters;
+    state.boardVersion = (state.boardVersion ?? 0) + 1;
+    state.selected = [];
+    renderLetters();
     state.combo += 1;
     state.recentWords.unshift(word);
     state.recentWords = state.recentWords.slice(0, 6);
@@ -406,7 +446,6 @@ async function submitWord() {
     ui.recentWords.replaceChildren(...state.recentWords.map((item) => { const chip = document.createElement("span"); chip.className = "word-chip"; chip.textContent = item; return chip; }));
     vibrate(18);
     track("word_accepted", { length: [...word].length, points });
-    clearWord();
   } catch (error) {
     state.combo = 0;
     ui.comboText.textContent = "";
@@ -502,6 +541,7 @@ ui.roomCodeInput.addEventListener("keydown", (event) => { if (event.key === "Ent
 ui.copyCodeButton.addEventListener("click", copyCode);
 ui.readyButton.addEventListener("click", toggleReady);
 ui.startButton.addEventListener("click", startMatch);
+ui.shuffleButton.addEventListener("click", shuffleLetters);
 ui.backspaceButton.addEventListener("click", backspace);
 ui.clearButton.addEventListener("click", clearWord);
 ui.submitWordButton.addEventListener("click", submitWord);
