@@ -82,7 +82,7 @@ export function burstFrom(element, options) {
 
 export function enterScreen(element) {
   if (!element || !motionAllowed()) return;
-  animate(element, { opacity: [0, 1], transform: ["translateY(10px) scale(.985)", "translateY(0) scale(1)"] }, { duration: .28, easing: [0.22, 1, 0.36, 1] });
+  animate(element, { opacity: [0, 1], transform: ["translateY(10px) scale(.985)", "translateY(0) scale(1)"] }, { duration: .28, ease: [0.22, 1, 0.36, 1] });
 }
 
 export function pressTile(element) {
@@ -92,7 +92,7 @@ export function pressTile(element) {
 
 export function refillTiles(elements) {
   if (!elements?.length || !motionAllowed()) return;
-  animate(elements, { opacity: [0, 1], transform: ["translateY(-18px) scale(.72) rotate(-5deg)", "translateY(0) scale(1) rotate(0deg)"] }, { delay: stagger(.035), duration: .3, easing: [0.22, 1, 0.36, 1] });
+  animate(elements, { opacity: [0, 1], transform: ["translateY(-18px) scale(.72) rotate(-5deg)", "translateY(0) scale(1) rotate(0deg)"] }, { delay: stagger(.035), duration: .3, ease: [0.22, 1, 0.36, 1] });
 }
 
 export function invalidWord(element) {
