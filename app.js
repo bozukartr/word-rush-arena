@@ -35,6 +35,7 @@ const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
+  "coinBadge", "coinText", "attackButton", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
   "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
@@ -53,6 +54,10 @@ const LETTER_STOCK = Object.freeze({
   Ö: 1, P: 1, R: 6, S: 3, Ş: 2, T: 5, U: 3, Ü: 2, V: 1,
   Y: 3, Z: 2
 });
+const VOWELS = new Set(["A", "E", "I", "İ", "O", "Ö", "U", "Ü"]);
+const ATTACK_COST = 25;
+const ATTACK_DURATION_MS = 8000;
+const ROUND_GRACE_MS = 2000;
 
 function letterPoint(letter) {
   return LETTER_POINTS[letter.toLocaleUpperCase("tr-TR")] ?? 1;
@@ -71,6 +76,25 @@ function createLetterBag(usedLetters = []) {
   return shuffle(bag);
 }
 
+function ensureMinimumVowels(letters, bag, minimum = 3, preferredIndexes = null) {
+  let missing = minimum - letters.filter((letter) => VOWELS.has(letter)).length;
+  if (missing <= 0) return;
+  const preferred = preferredIndexes?.filter((index) => letters[index] && !VOWELS.has(letters[index])) ?? [];
+  const fallback = letters.map((letter, index) => ({ letter, index }))
+    .filter(({ letter, index }) => letter && !VOWELS.has(letter) && !preferred.includes(index))
+    .map(({ index }) => index);
+  const replaceable = [...preferred, ...fallback];
+  while (missing > 0 && replaceable.length) {
+    const vowelIndex = bag.findIndex((letter) => VOWELS.has(letter));
+    if (vowelIndex < 0) break;
+    const boardIndex = replaceable.shift();
+    const [vowel] = bag.splice(vowelIndex, 1);
+    bag.unshift(letters[boardIndex]);
+    letters[boardIndex] = vowel;
+    missing -= 1;
+  }
+}
+
 const state = {
   uid: null,
   roomCode: null,
@@ -86,6 +110,12 @@ const state = {
   playerLetters: [],
   playerBag: null,
   boardInitializing: false,
+  coins: 0,
+  effects: [],
+  blockedActive: false,
+  rewarding: false,
+  finishing: false,
+  profileUnsubscriber: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -113,6 +143,22 @@ function track(name, params = {}) {
   if (analytics) logEvent(analytics, name, params);
 }
 
+async function ensureProfile() {
+  await runTransaction(db, async (transaction) => {
+    const ref = profileRef();
+    if (!(await transaction.get(ref)).exists()) {
+      transaction.set(ref, { coins: 0, lastAction: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    }
+  });
+  state.profileUnsubscriber?.();
+  state.profileUnsubscriber = onSnapshot(profileRef(), (snapshot) => {
+    state.coins = snapshot.data()?.coins ?? 0;
+    ui.coinText.textContent = state.coins;
+    ui.coinBadge.classList.remove("hidden");
+    renderAttackButton();
+  });
+}
+
 function cleanName() {
   const value = ui.playerName.value.trim().replace(/\s+/g, " ");
   if (value.length < 2) throw new Error("Oyuncu adı en az 2 karakter olmalı.");
@@ -128,6 +174,7 @@ function cleanCode() {
 
 function roomRef(code = state.roomCode) { return doc(db, "rooms", code); }
 function playerRef(uid = state.uid, code = state.roomCode) { return doc(db, "rooms", code, "players", uid); }
+function profileRef(uid = state.uid) { return doc(db, "profiles", uid); }
 
 function randomCode() {
   return String(Math.floor(10000 + Math.random() * 90000));
@@ -151,6 +198,7 @@ function createLetters() {
     if (index >= 0 && letters.length < 12) letters.push(...bag.splice(index, 1));
   }
   while (letters.length < 12) letters.push(bag.pop());
+  ensureMinimumVowels(letters, bag, 3);
   return shuffle(letters);
 }
 
@@ -165,11 +213,12 @@ async function createRoom() {
         const ref = roomRef(candidate);
         if ((await transaction.get(ref)).exists()) return false;
         transaction.set(ref, {
-          hostId: state.uid, phase: "lobby", round: 0, boardVersion: 0, maxPlayers: 4, letters: [], endsAt: null,
+          hostId: state.uid, phase: "lobby", round: 0, boardVersion: 0, maxPlayers: 4, letters: [], endsAt: null, winnerId: null,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         transaction.set(playerRef(state.uid, candidate), {
-          name, score: 0, words: 0, round: 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
+          name, score: 0, words: 0, round: 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1,
+          attackUsedRound: -1, rewardedRound: -1, ready: false, connected: true,
           joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
         });
         return true;
@@ -195,7 +244,8 @@ async function joinRoom() {
     const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
     if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
     await setDoc(playerRef(state.uid, code), {
-      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
+      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1,
+      attackUsedRound: -1, rewardedRound: -1, ready: false, connected: true,
       joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
     }, { merge: true });
     track("room_join");
@@ -213,6 +263,10 @@ async function enterRoom(code) {
   state.playerLetters = [];
   state.playerBag = null;
   state.boardInitializing = false;
+  state.effects = [];
+  state.blockedActive = false;
+  state.finishing = false;
+  ui.attackPicker.classList.add("hidden");
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
@@ -231,8 +285,13 @@ async function enterRoom(code) {
     renderPlayers();
     renderScores();
     renderStock();
+    renderAttackButton();
     renderResults();
     if (state.room?.phase === "playing") ensurePlayerBoard();
+  }));
+  state.unsubscribers.push(onSnapshot(collection(roomRef(), "effects"), (snapshot) => {
+    state.effects = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    refreshBlockedLetters(true);
   }));
   clearInterval(state.heartbeat);
   state.heartbeat = setInterval(() => updateDoc(playerRef(), { connected: true, lastSeenAt: serverTimestamp() }).catch(() => {}), 20000);
@@ -248,11 +307,13 @@ function routeRoomPhase() {
     showScreen("gameScreen");
     ensurePlayerBoard();
     renderLetters();
+    renderAttackButton();
     startTimer();
   } else if (state.room.phase === "results") {
     clearInterval(state.timer);
     showScreen("resultsScreen");
     renderResults();
+    awardRound();
   }
 }
 
@@ -341,12 +402,98 @@ function renderStock() {
   ui.stockText.textContent = `KALAN ${Array.isArray(state.playerBag) ? state.playerBag.length : "–"}`;
 }
 
+function isLetterBlocked(letter) {
+  const now = Date.now();
+  return state.effects.some((effect) =>
+    effect.targetId === state.uid &&
+    effect.type === "block_letter" &&
+    effect.letter === letter &&
+    (effect.expiresAt?.toMillis?.() ?? 0) > now
+  );
+}
+
+function refreshBlockedLetters(force = false) {
+  const active = isLetterBlocked("A");
+  const changed = active !== state.blockedActive;
+  if (!force && !changed) return;
+  state.blockedActive = active;
+  if (changed && active) {
+    state.selected = state.selected.filter((index) => !isLetterBlocked(activeLetters()[index]));
+    ui.gameStatus.textContent = "A harflerin kilitlendi";
+  } else if (changed && state.room?.phase === "playing") {
+    ui.gameStatus.textContent = "Harfleri seç";
+  }
+  if (state.room?.phase === "playing") renderLetters();
+}
+
+function renderAttackButton() {
+  if (!ui.attackButton) return;
+  const me = state.players.find((player) => player.uid === state.uid);
+  const used = me?.attackUsedRound === (state.room?.round ?? 0);
+  ui.attackButton.textContent = used ? "KULLANILDI" : `A KİLİTLE · ${ATTACK_COST}`;
+  ui.attackButton.disabled = state.room?.phase !== "playing" || used || state.coins < ATTACK_COST;
+}
+
+function openAttackPicker() {
+  const me = state.players.find((player) => player.uid === state.uid);
+  if (state.coins < ATTACK_COST) { toast("Yeterli jeton yok.", true); return; }
+  if (me?.attackUsedRound === (state.room?.round ?? 0)) { toast("Bu tur engel kullandın.", true); return; }
+  const opponents = state.players.filter((player) => player.uid !== state.uid);
+  ui.attackTargets.replaceChildren(...opponents.map((player) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "attack-target";
+    button.textContent = player.name;
+    button.addEventListener("click", () => useAttack(player.uid));
+    return button;
+  }));
+  ui.attackPicker.classList.remove("hidden");
+}
+
+async function useAttack(targetId) {
+  try {
+    const round = state.room?.round ?? 0;
+    const effectRef = doc(roomRef(), "effects", state.uid);
+    await runTransaction(db, async (transaction) => {
+      const currentRoom = await transaction.get(roomRef());
+      const currentPlayer = await transaction.get(playerRef());
+      const profile = await transaction.get(profileRef());
+      const target = await transaction.get(playerRef(targetId));
+      if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
+      if (!currentPlayer.exists() || currentPlayer.data().attackUsedRound === round) throw new Error("Bu tur engel kullandın.");
+      if (!target.exists() || targetId === state.uid) throw new Error("Hedef bulunamadı.");
+      if (!profile.exists() || (profile.data().coins ?? 0) < ATTACK_COST) throw new Error("Yeterli jeton yok.");
+      transaction.update(profileRef(), {
+        coins: increment(-ATTACK_COST),
+        lastAction: { type: "attack", roomCode: state.roomCode, round },
+        updatedAt: serverTimestamp()
+      });
+      transaction.update(playerRef(), { attackUsedRound: round, lastSeenAt: serverTimestamp() });
+      transaction.set(effectRef, {
+        ownerId: state.uid,
+        targetId,
+        type: "block_letter",
+        letter: "A",
+        round,
+        createdAt: serverTimestamp(),
+        expiresAt: Timestamp.fromMillis(Date.now() + ATTACK_DURATION_MS)
+      });
+    });
+    ui.attackPicker.classList.add("hidden");
+    toast("Rakibin A harfleri kilitlendi.");
+    vibrate([20, 25, 20]);
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function renderLetters() {
   const letters = activeLetters();
   ui.letterGrid.replaceChildren(...letters.map((letter, index) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `letter-tile${state.selected.includes(index) ? " selected" : ""}`;
+    const blocked = isLetterBlocked(letter);
+    button.className = `letter-tile${state.selected.includes(index) ? " selected" : ""}${blocked ? " blocked" : ""}`;
     const glyph = document.createElement("span");
     glyph.className = "tile-letter";
     glyph.textContent = letter;
@@ -354,8 +501,8 @@ function renderLetters() {
     point.className = "tile-point";
     point.textContent = letter ? letterPoint(letter) : "";
     button.append(glyph, point);
-    button.disabled = !letter;
-    button.ariaLabel = letter ? `${letter} harfi, ${letterPoint(letter)} puan` : "Boş harf yuvası";
+    button.disabled = !letter || blocked;
+    button.ariaLabel = blocked ? `${letter} harfi geçici olarak kilitli` : (letter ? `${letter} harfi, ${letterPoint(letter)} puan` : "Boş harf yuvası");
     button.addEventListener("pointerdown", (event) => { event.preventDefault(); selectLetter(index); });
     return button;
   }));
@@ -363,7 +510,7 @@ function renderLetters() {
 }
 
 function selectLetter(index) {
-  if (state.shuffling || !activeLetters()[index] || state.selected.includes(index) || state.room?.phase !== "playing") return;
+  if (state.shuffling || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index) || state.room?.phase !== "playing") return;
   state.selected.push(index);
   vibrate(8);
   renderLetters();
@@ -441,16 +588,40 @@ async function submitWord() {
   const word = normalizeWord(displayed);
   if ([...word].length < 2) { toast("Kelime çok kısa.", true); return; }
   if (!isValidWord(word)) { state.combo = 0; toast("Bu kelime sözlükte yok.", true); vibrate([30, 30, 30]); return; }
+  if (!Array.isArray(state.playerBag)) { toast("Harf stoğu hazırlanıyor.", true); return; }
+  const submittedAtMs = Date.now();
+  const points = pointsFor(word);
+  const previous = {
+    letters: [...activeLetters()],
+    bag: [...state.playerBag],
+    combo: state.combo,
+    recentWords: [...state.recentWords]
+  };
+  const optimisticLetters = [...previous.letters];
+  const optimisticBag = [...previous.bag];
+  for (const index of selectedIndexes) optimisticLetters[index] = optimisticBag.pop() ?? "";
+  ensureMinimumVowels(optimisticLetters, optimisticBag, 3, selectedIndexes);
   state.submitting = true;
-  renderCurrentWord();
+  state.playerLetters = optimisticLetters;
+  state.playerBag = optimisticBag;
+  state.boardVersion = (state.boardVersion ?? 0) + 1;
+  state.selected = [];
+  state.combo += 1;
+  state.recentWords.unshift(word);
+  state.recentWords = state.recentWords.slice(0, 6);
+  ui.gameStatus.textContent = `${displayed} kabul edildi · +${points}`;
+  ui.comboText.textContent = state.combo > 1 ? `x${state.combo} SERİ` : "";
+  ui.recentWords.replaceChildren(...state.recentWords.map((item) => { const chip = document.createElement("span"); chip.className = "word-chip"; chip.textContent = item; return chip; }));
+  renderLetters();
+  renderStock();
+  vibrate(18);
   try {
-    const points = pointsFor(word);
     let refreshedLetters = null;
     let refreshedBag = null;
     await runTransaction(db, async (transaction) => {
       const currentRoom = await transaction.get(roomRef());
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
-      if (currentRoom.data().endsAt.toMillis() <= Date.now()) throw new Error("Süre doldu.");
+      if (currentRoom.data().endsAt.toMillis() <= submittedAtMs) throw new Error("Süre doldu.");
       const roomData = currentRoom.data();
       const currentPlayer = await transaction.get(playerRef());
       if (!currentPlayer.exists()) throw new Error("Oyuncu bulunamadı.");
@@ -468,6 +639,7 @@ async function submitWord() {
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
       const nextLetters = [...liveLetters];
       for (const index of selectedIndexes) nextLetters[index] = liveBag.pop() ?? "";
+      ensureMinimumVowels(nextLetters, liveBag, 3, selectedIndexes);
       refreshedLetters = nextLetters;
       refreshedBag = liveBag;
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
@@ -483,21 +655,21 @@ async function submitWord() {
     });
     state.playerLetters = refreshedLetters ?? state.playerLetters;
     state.playerBag = refreshedBag ?? state.playerBag;
-    state.boardVersion = (state.boardVersion ?? 0) + 1;
-    state.selected = [];
     renderLetters();
     renderStock();
-    state.combo += 1;
-    state.recentWords.unshift(word);
-    state.recentWords = state.recentWords.slice(0, 6);
-    ui.gameStatus.textContent = `${displayed} kabul edildi · +${points}`;
-    ui.comboText.textContent = state.combo > 1 ? `x${state.combo} SERİ` : "";
-    ui.recentWords.replaceChildren(...state.recentWords.map((item) => { const chip = document.createElement("span"); chip.className = "word-chip"; chip.textContent = item; return chip; }));
-    vibrate(18);
     track("word_accepted", { length: [...word].length, points });
   } catch (error) {
-    state.combo = 0;
-    ui.comboText.textContent = "";
+    state.playerLetters = previous.letters;
+    state.playerBag = previous.bag;
+    state.boardVersion = Math.max(0, (state.boardVersion ?? 1) - 1);
+    state.selected = [];
+    state.combo = previous.combo;
+    state.recentWords = previous.recentWords;
+    ui.comboText.textContent = state.combo > 1 ? `x${state.combo} SERİ` : "";
+    ui.recentWords.replaceChildren(...state.recentWords.map((item) => { const chip = document.createElement("span"); chip.className = "word-chip"; chip.textContent = item; return chip; }));
+    ui.gameStatus.textContent = "Harfleri seç";
+    renderLetters();
+    renderStock();
     toast(error.message, true);
   } finally {
     state.submitting = false;
@@ -511,8 +683,18 @@ function startTimer() {
     const end = state.room?.endsAt?.toMillis?.() ?? 0;
     const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     ui.timerText.textContent = remaining;
-    if (remaining === 0 && state.room?.phase === "playing" && state.room.hostId === state.uid) {
-      await updateDoc(roomRef(), { phase: "results", updatedAt: serverTimestamp() }).catch(() => {});
+    refreshBlockedLetters();
+    if (
+      end && Date.now() >= end + ROUND_GRACE_MS &&
+      state.room?.phase === "playing" && state.room.hostId === state.uid && !state.finishing
+    ) {
+      state.finishing = true;
+      const winner = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score)[0];
+      try {
+        await updateDoc(roomRef(), { phase: "results", winnerId: winner?.uid ?? null, updatedAt: serverTimestamp() });
+      } catch (error) {
+        state.finishing = false;
+      }
     }
   };
   tick();
@@ -527,8 +709,10 @@ async function toggleReady() {
 async function startMatch() {
   const players = state.players.map(currentRoundPlayer);
   if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
+  state.finishing = false;
   await updateDoc(roomRef(), {
-    phase: "playing", letters: createLetters(), boardVersion: increment(1), endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
+    phase: "playing", letters: createLetters(), boardVersion: increment(1), winnerId: null,
+    endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
   });
   track("match_start", { players: state.players.length });
 }
@@ -548,13 +732,43 @@ function renderResults() {
   ui.rematchStatus.textContent = state.room?.hostId === state.uid ? "" : "Oda sahibi yeni turu başlatabilir";
 }
 
+async function awardRound() {
+  if (state.rewarding || !state.roomCode) return;
+  state.rewarding = true;
+  try {
+    const reward = await runTransaction(db, async (transaction) => {
+      const currentRoom = await transaction.get(roomRef());
+      const currentPlayer = await transaction.get(playerRef());
+      const profile = await transaction.get(profileRef());
+      if (!currentRoom.exists() || currentRoom.data().phase !== "results" || !currentPlayer.exists() || !profile.exists()) return 0;
+      const round = currentRoom.data().round ?? 0;
+      if (currentPlayer.data().rewardedRound === round) return 0;
+      const amount = currentRoom.data().winnerId === state.uid ? 40 : 5;
+      transaction.update(profileRef(), {
+        coins: increment(amount),
+        lastAction: { type: "reward", roomCode: state.roomCode, round },
+        updatedAt: serverTimestamp()
+      });
+      transaction.update(playerRef(), { rewardedRound: round, lastSeenAt: serverTimestamp() });
+      return amount;
+    });
+    if (reward > 0) ui.rewardText.textContent = `+${reward} JETON`;
+  } catch (error) {
+    ui.rewardText.textContent = "";
+  } finally {
+    state.rewarding = false;
+  }
+}
+
 async function rematch() {
   if (state.room?.hostId !== state.uid) return;
   await updateDoc(roomRef(), {
-    phase: "lobby", round: increment(1), letters: [], endsAt: null, updatedAt: serverTimestamp()
+    phase: "lobby", round: increment(1), letters: [], endsAt: null, winnerId: null, updatedAt: serverTimestamp()
   });
   state.combo = 0;
   state.recentWords = [];
+  state.finishing = false;
+  ui.rewardText.textContent = "";
 }
 
 async function copyCode() {
@@ -572,7 +786,12 @@ function leaveListeners() {
 async function leaveRoom() {
   if (state.roomCode && state.uid) await updateDoc(playerRef(), { connected: false, lastSeenAt: serverTimestamp() }).catch(() => {});
   leaveListeners();
-  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false });
+  Object.assign(state, {
+    roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false,
+    boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false,
+    effects: [], blockedActive: false, rewarding: false, finishing: false
+  });
+  ui.attackPicker.classList.add("hidden");
   showScreen("homeScreen");
 }
 
@@ -590,6 +809,8 @@ ui.roomCodeInput.addEventListener("keydown", (event) => { if (event.key === "Ent
 ui.copyCodeButton.addEventListener("click", copyCode);
 ui.readyButton.addEventListener("click", toggleReady);
 ui.startButton.addEventListener("click", startMatch);
+ui.attackButton.addEventListener("click", openAttackPicker);
+ui.closeAttackButton.addEventListener("click", () => ui.attackPicker.classList.add("hidden"));
 ui.shuffleButton.addEventListener("click", shuffleLetters);
 ui.backspaceButton.addEventListener("click", backspace);
 ui.clearButton.addEventListener("click", clearWord);
@@ -604,9 +825,12 @@ window.addEventListener("beforeunload", () => { if (state.roomCode) updateDoc(pl
 ui.playerName.value = localStorage.getItem("wra-player-name") ?? "";
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
-  try { await dictionaryReady; }
-  catch (error) { toast(error.message, true); return; }
   state.uid = user.uid;
+  try {
+    await dictionaryReady;
+    await ensureProfile();
+  }
+  catch (error) { toast(error.message, true); return; }
   setConnection("online", "Çevrimiçi");
   showScreen("homeScreen");
   track("app_ready");
