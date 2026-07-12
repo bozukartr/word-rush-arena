@@ -297,7 +297,7 @@ async function joinQuickRoom(code) {
     name: state.profile?.displayName ?? auth.currentUser?.displayName ?? "Oyuncu",
     score: 0, words: 0, round: room.data().round ?? 0, letters: [], letterBag: [],
     boardVersion: 0, boardRound: -1, attackUsedRound: -1, rewardedRound: -1,
-    ready: true, connected: true, joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
+    ready: true, connected: true, lastSeenAt: serverTimestamp()
   }, { merge: true });
   state.matchmakingUnsubscriber?.();
   state.matchmakingUnsubscriber = null;
