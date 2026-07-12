@@ -6,6 +6,41 @@ service cloud.firestore {
     function roomExistsAfter(code) { return existsAfter(/databases/$(database)/documents/rooms/$(code)); }
     function isPlayer(code) { return signedIn() && exists(/databases/$(database)/documents/rooms/$(code)/players/$(request.auth.uid)); }
     function isHost(code) { return signedIn() && get(/databases/$(database)/documents/rooms/$(code)).data.hostId == request.auth.uid; }
+    function validAttackPurchase(uid) {
+      let action = request.resource.data.lastAction;
+      let code = action.roomCode;
+      let round = action.round;
+      let profileBefore = resource.data;
+      let playerBefore = get(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
+      let playerAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
+      let effectAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/effects/$(uid)).data;
+      return action.type == 'attack'
+        && action.roomCode is string
+        && action.round is int
+        && request.resource.data.coins == profileBefore.coins - 25
+        && get(/databases/$(database)/documents/rooms/$(code)).data.phase == 'playing'
+        && playerBefore.get('attackUsedRound', -1) != round
+        && playerAfter.attackUsedRound == round
+        && effectAfter.ownerId == uid
+        && effectAfter.round == round;
+    }
+    function validRoundReward(uid) {
+      let action = request.resource.data.lastAction;
+      let code = action.roomCode;
+      let round = action.round;
+      let room = get(/databases/$(database)/documents/rooms/$(code)).data;
+      let playerBefore = get(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
+      let playerAfter = getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(uid)).data;
+      let reward = room.winnerId == uid ? 40 : 5;
+      return action.type == 'reward'
+        && action.roomCode is string
+        && action.round is int
+        && room.phase == 'results'
+        && room.round == round
+        && playerBefore.get('rewardedRound', -1) != round
+        && playerAfter.rewardedRound == round
+        && request.resource.data.coins == resource.data.coins + reward;
+    }
 
     match /rooms/{code} {
       allow read: if signedIn();
@@ -23,7 +58,7 @@ service cloud.firestore {
         allow create: if signedIn() && request.auth.uid == uid && roomExistsAfter(code);
         allow update: if signedIn() && request.auth.uid == uid
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['name', 'ready', 'connected', 'lastSeenAt', 'score', 'words', 'round', 'letters', 'letterBag', 'boardVersion', 'boardRound']);
+            .hasOnly(['name', 'ready', 'connected', 'lastSeenAt', 'score', 'words', 'round', 'letters', 'letterBag', 'boardVersion', 'boardRound', 'attackUsedRound', 'rewardedRound']);
         allow delete: if signedIn() && (request.auth.uid == uid || isHost(code));
       }
 
@@ -37,6 +72,42 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if isHost(code);
       }
+
+      match /effects/{effectId} {
+        allow read: if isPlayer(code);
+        allow create, update: if isPlayer(code)
+          && effectId == request.auth.uid
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.targetId != request.auth.uid
+          && request.resource.data.type == 'block_letter'
+          && request.resource.data.letter == 'A'
+          && request.resource.data.round is int
+          && request.resource.data.expiresAt is timestamp
+          && get(/databases/$(database)/documents/rooms/$(code)).data.phase == 'playing'
+          && exists(/databases/$(database)/documents/rooms/$(code)/players/$(request.resource.data.targetId))
+          && getAfter(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.coins
+            == get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.coins - 25
+          && getAfter(/databases/$(database)/documents/rooms/$(code)/players/$(request.auth.uid)).data.attackUsedRound
+            == request.resource.data.round
+          && (!exists(/databases/$(database)/documents/rooms/$(code)/effects/$(effectId))
+            || request.resource.data.round > resource.data.round);
+        allow delete: if isHost(code);
+      }
+    }
+
+    match /profiles/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.coins == 0
+        && request.resource.data.lastAction == null;
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['coins', 'lastAction', 'updatedAt'])
+        && request.resource.data.coins is int
+        && request.resource.data.coins >= 0
+        && request.resource.data.coins <= 100000
+        && request.resource.data.lastAction is map
+        && (validAttackPurchase(uid) || validRoundReward(uid));
+      allow delete: if false;
     }
 
     match /{document=**} { allow read, write: if false; }
