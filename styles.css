@@ -170,3 +170,38 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(120, 87, 2
 .attack-target { min-height: 52px; padding: 0 16px; border: 1px solid rgba(255, 108, 132, .24); border-radius: 16px; color: #fff; background: rgba(255, 84, 116, .08); text-align: left; font-weight: 850; cursor: pointer; touch-action: manipulation; }
 .attack-target:active { transform: scale(.98); }
 .reward-text { min-height: 24px; margin: -13px 0 14px; color: var(--gold); font-size: 13px; font-weight: 950; letter-spacing: .08em; }
+
+
+.diamond-badge { height: 28px; padding: 0 9px; display: flex; align-items: center; gap: 5px; border-radius: 999px; color: #8ff5ff; background: linear-gradient(135deg, rgba(80, 220, 255, .14), rgba(145, 112, 255, .14)); border: 1px solid rgba(131, 237, 255, .28); box-shadow: 0 0 20px rgba(91, 221, 255, .1); font-size: 13px; font-weight: 950; }
+.diamond-badge b { color: #dcfbff; font-size: 11px; }
+.profile-button { width: 28px; height: 28px; padding: 0; border: 1px solid rgba(151, 126, 255, .35); border-radius: 50%; color: #c7baff; background: rgba(124, 99, 255, .14); cursor: pointer; }
+.google-button { color: #202124; background: #fff; }
+.google-button span { width: 23px; height: 23px; margin-right: 8px; display: inline-grid; place-items: center; border-radius: 50%; color: #4285f4; background: #f4f6fb; font-weight: 950; }
+.quick-match-status { min-height: 16px; margin: -4px 0 2px; color: var(--muted); text-align: center; font-size: 11px; }
+.profile-screen { padding: 4px 0 max(24px, env(safe-area-inset-bottom)); overflow-y: auto; }
+.profile-head { display: flex; align-items: center; gap: 13px; margin-bottom: 14px; }
+.profile-head strong { font-size: 12px; letter-spacing: .12em; }
+.profile-card { padding: 20px; border: 1px solid var(--line); border-radius: 24px; background: linear-gradient(145deg, rgba(40, 44, 79, .9), rgba(20, 23, 45, .94)); text-align: center; }
+.profile-avatar { width: 74px; height: 74px; object-fit: cover; border: 3px solid rgba(143, 245, 255, .5); border-radius: 50%; box-shadow: 0 0 28px rgba(90, 223, 255, .12); }
+.profile-card h2 { margin: 10px 0 5px; font-size: 22px; }
+.profile-code { color: var(--muted); font-size: 10px; letter-spacing: .08em; }
+.profile-code b { margin-left: 6px; color: #fff; user-select: all; }
+.profile-wallet { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+.profile-wallet > div { min-height: 66px; padding: 9px; display: grid; grid-template-columns: auto auto; place-content: center; column-gap: 6px; border-radius: 16px; color: var(--gold); background: rgba(255, 200, 87, .08); }
+.profile-wallet > div.diamond { color: #8ff5ff; background: rgba(91, 221, 255, .08); }
+.profile-wallet b { font-size: 19px; }
+.profile-wallet small { grid-column: 1 / -1; color: var(--muted); font-size: 8px; letter-spacing: .1em; }
+.friend-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 12px 0; }
+.friend-add input { min-width: 0; text-transform: uppercase; }
+.friend-add button, .friend-row button { padding: 0 14px; border: 0; border-radius: 14px; color: #fff; background: var(--purple); font-size: 10px; font-weight: 900; cursor: pointer; }
+.friend-list { display: grid; gap: 7px; }
+.friend-list.requests { margin-bottom: 8px; }
+.friend-row { min-height: 50px; padding: 0 14px; display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255, 255, 255, .035); }
+.friend-row strong { flex: 1; text-align: left; font-size: 13px; }
+.friend-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px rgba(81, 229, 168, .35); }
+.friend-row.request { border-color: rgba(151, 126, 255, .28); }
+@media (max-width: 390px) {
+  .header-status { gap: 4px; }
+  .coin-badge, .diamond-badge { padding: 0 6px; }
+  .connection-badge span { display: none; }
+}
