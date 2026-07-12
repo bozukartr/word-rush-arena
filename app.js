@@ -68,6 +68,7 @@ const state = {
   submitting: false,
   ready: false,
   boardVersion: null,
+  playerLetters: [],
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -146,7 +147,7 @@ async function createRoom() {
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         transaction.set(playerRef(state.uid, candidate), {
-          name, score: 0, words: 0, round: 0, ready: false, connected: true,
+          name, score: 0, words: 0, round: 0, letters: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
           joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
         });
         return true;
@@ -172,7 +173,7 @@ async function joinRoom() {
     const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
     if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
     await setDoc(playerRef(state.uid, code), {
-      name, score: 0, words: 0, round: snapshot.data().round ?? 0, ready: false, connected: true,
+      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], boardVersion: 0, boardRound: -1, ready: false, connected: true,
       joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
     }, { merge: true });
     track("room_join");
@@ -186,26 +187,22 @@ async function enterRoom(code) {
   state.roomCode = code;
   state.selected = [];
   state.recentWords = [];
+  state.boardVersion = null;
+  state.playerLetters = [];
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
-    const nextRoom = snapshot.data();
-    const nextVersion = nextRoom.boardVersion ?? 0;
-    if (
-      state.boardVersion !== null &&
-      nextVersion !== state.boardVersion &&
-      nextRoom.phase === "playing"
-    ) {
-      state.selected = [];
-    }
-    state.boardVersion = nextVersion;
-    state.room = nextRoom;
+    state.room = snapshot.data();
     routeRoomPhase();
   }, () => toast("Oda verisi okunamadı.", true)));
   state.unsubscribers.push(onSnapshot(query(collection(roomRef(), "players"), orderBy("score", "desc")), (snapshot) => {
     state.players = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
     const me = state.players.find((player) => player.uid === state.uid);
     state.ready = Boolean(me?.ready) && me?.round === (state.room?.round ?? 0);
+    const nextBoardVersion = me?.boardVersion ?? 0;
+    if (state.boardVersion !== null && nextBoardVersion !== state.boardVersion) state.selected = [];
+    state.boardVersion = nextBoardVersion;
+    state.playerLetters = me?.boardRound === (state.room?.round ?? 0) ? (me?.letters ?? []) : [];
     renderPlayers();
     renderScores();
     renderResults();
@@ -222,6 +219,7 @@ function routeRoomPhase() {
     renderPlayers();
   } else if (state.room.phase === "playing") {
     showScreen("gameScreen");
+    ensurePlayerBoard();
     renderLetters();
     startTimer();
   } else if (state.room.phase === "results") {
@@ -286,8 +284,24 @@ function renderScores() {
   ui.rankText.textContent = rank < 0 ? "–" : `#${rank + 1}`;
 }
 
+async function ensurePlayerBoard() {
+  const me = state.players.find((player) => player.uid === state.uid);
+  const round = state.room?.round ?? 0;
+  if (!me || me.boardRound === round || !(state.room?.letters?.length)) return;
+  await updateDoc(playerRef(), {
+    letters: state.room.letters,
+    boardRound: round,
+    boardVersion: state.room.boardVersion ?? 0,
+    lastSeenAt: serverTimestamp()
+  }).catch(() => {});
+}
+
+function activeLetters() {
+  return state.playerLetters.length ? state.playerLetters : (state.room?.letters ?? []);
+}
+
 function renderLetters() {
-  const letters = state.room?.letters ?? [];
+  const letters = activeLetters();
   ui.letterGrid.replaceChildren(...letters.map((letter, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -314,7 +328,8 @@ function selectLetter(index) {
 }
 
 function currentWord() {
-  return state.selected.map((index) => state.room.letters[index]).join("");
+  const letters = activeLetters();
+  return state.selected.map((index) => letters[index]).join("");
 }
 
 function renderCurrentWord() {
@@ -360,20 +375,28 @@ async function submitWord() {
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
       if (currentRoom.data().endsAt.toMillis() <= Date.now()) throw new Error("Süre doldu.");
       const roomData = currentRoom.data();
-      const liveWord = selectedIndexes.map((index) => roomData.letters[index]).join("");
-      if (normalizeWord(liveWord) !== word) throw new Error("Harfler rakip tarafından değiştirildi.");
+      const currentPlayer = await transaction.get(playerRef());
+      if (!currentPlayer.exists()) throw new Error("Oyuncu bulunamadı.");
+      const playerData = currentPlayer.data();
+      const liveLetters = playerData.boardRound === (roomData.round ?? 0)
+        ? playerData.letters
+        : roomData.letters;
+      const liveWord = selectedIndexes.map((index) => liveLetters[index]).join("");
+      if (normalizeWord(liveWord) !== word) throw new Error("Harfler yenilendi, tekrar seç.");
       const round = roomData.round ?? 0;
       const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
-      const nextLetters = [...roomData.letters];
+      const nextLetters = [...liveLetters];
       for (const index of selectedIndexes) nextLetters[index] = randomLetter();
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
-      transaction.update(roomRef(), {
+      transaction.update(playerRef(), {
         letters: nextLetters,
+        boardRound: round,
         boardVersion: increment(1),
-        updatedAt: serverTimestamp()
+        score: increment(points),
+        words: increment(1),
+        lastSeenAt: serverTimestamp()
       });
-      transaction.update(playerRef(), { score: increment(points), words: increment(1), lastSeenAt: serverTimestamp() });
     });
     state.combo += 1;
     state.recentWords.unshift(word);
@@ -461,7 +484,7 @@ function leaveListeners() {
 async function leaveRoom() {
   if (state.roomCode && state.uid) await updateDoc(playerRef(), { connected: false, lastSeenAt: serverTimestamp() }).catch(() => {});
   leaveListeners();
-  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null });
+  Object.assign(state, { roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false, boardVersion: null, playerLetters: [] });
   showScreen("homeScreen");
 }
 
