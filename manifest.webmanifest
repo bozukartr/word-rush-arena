@@ -1,0 +1,12 @@
+{
+  "name": "Word Rush Arena",
+  "short_name": "Word Rush",
+  "description": "Gerçek zamanlı rekabetçi kelime oyunu",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#090b18",
+  "theme_color": "#090b18",
+  "icons": []
+}

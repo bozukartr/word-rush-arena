@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function roomExists(code) { return exists(/databases/$(database)/documents/rooms/$(code)); }
+    function isPlayer(code) { return signedIn() && exists(/databases/$(database)/documents/rooms/$(code)/players/$(request.auth.uid)); }
+    function isHost(code) { return signedIn() && get(/databases/$(database)/documents/rooms/$(code)).data.hostId == request.auth.uid; }
+
+    match /rooms/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.phase == 'lobby';
+      allow update: if isPlayer(code) && (
+        isHost(code) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+      );
+      allow delete: if isHost(code);
+
+      match /players/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn() && request.auth.uid == uid && roomExists(code);
+        allow update: if signedIn() && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'ready', 'connected', 'lastSeenAt', 'score', 'words']);
+        allow delete: if signedIn() && (request.auth.uid == uid || isHost(code));
+      }
+
+      match /submissions/{word} {
+        allow read: if isPlayer(code);
+        allow create: if isPlayer(code)
+          && request.resource.data.ownerId == request.auth.uid
+          && request.resource.data.points is int
+          && request.resource.data.points >= 0
+          && request.resource.data.points <= 2000;
+        allow update: if false;
+        allow delete: if isHost(code);
+      }
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
