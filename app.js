@@ -3,12 +3,12 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "https
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js";
 import { connectAuthEmulator, getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
-  Timestamp, collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs,
+  Timestamp, collection, connectFirestoreEmulator, doc, getDoc, getDocs,
   getFirestore, increment, limit, onSnapshot, orderBy, query, runTransaction,
-  serverTimestamp, setDoc, updateDoc, where, writeBatch
+  serverTimestamp, setDoc, updateDoc
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
 import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
-import { SEED_WORDS, isValidWord, normalizeWord } from "./words.js";
+import { isValidWord, loadDictionary, normalizeWord, randomSeedWord } from "./words.js";
 
 const app = initializeApp(firebaseConfig);
 if (appCheckSiteKey) {
@@ -36,8 +36,10 @@ const ui = Object.fromEntries([
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "comboText", "letterGrid", "currentWord",
   "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
-  "rematchButton", "homeButton", "toast"
+  "rematchButton", "rematchStatus", "homeButton", "toast"
 ].map((id) => [id, $(id)]));
+
+const dictionaryReady = loadDictionary();
 
 const state = {
   uid: null,
@@ -84,8 +86,8 @@ function cleanName() {
 }
 
 function cleanCode() {
-  const value = ui.roomCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (value.length !== 6) throw new Error("6 karakterli oda kodunu gir.");
+  const value = ui.roomCodeInput.value.replace(/\D/g, "").slice(0, 5);
+  if (value.length !== 5) throw new Error("5 haneli oda kodunu gir.");
   return value;
 }
 
@@ -93,8 +95,7 @@ function roomRef(code = state.roomCode) { return doc(db, "rooms", code); }
 function playerRef(uid = state.uid, code = state.roomCode) { return doc(db, "rooms", code, "players", uid); }
 
 function randomCode() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+  return String(Math.floor(10000 + Math.random() * 90000));
 }
 
 function shuffle(items) {
@@ -107,7 +108,7 @@ function shuffle(items) {
 }
 
 function createLetters() {
-  const seed = SEED_WORDS[Math.floor(Math.random() * SEED_WORDS.length)];
+  const seed = randomSeedWord();
   const pool = "AAAAABCDEEEFGĞHIIİJKLMNOÖPRSTUÜVYZ";
   const letters = [...seed.toLocaleUpperCase("tr-TR")];
   while (letters.length < 12) letters.push(pool[Math.floor(Math.random() * pool.length)]);
@@ -125,11 +126,11 @@ async function createRoom() {
         const ref = roomRef(candidate);
         if ((await transaction.get(ref)).exists()) return false;
         transaction.set(ref, {
-          hostId: state.uid, phase: "lobby", maxPlayers: 4, letters: [], endsAt: null,
+          hostId: state.uid, phase: "lobby", round: 0, maxPlayers: 4, letters: [], endsAt: null,
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
         transaction.set(playerRef(state.uid, candidate), {
-          name, score: 0, words: 0, ready: false, connected: true,
+          name, score: 0, words: 0, round: 0, ready: false, connected: true,
           joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
         });
         return true;
@@ -155,7 +156,7 @@ async function joinRoom() {
     const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
     if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
     await setDoc(playerRef(state.uid, code), {
-      name, score: 0, words: 0, ready: false, connected: true,
+      name, score: 0, words: 0, round: snapshot.data().round ?? 0, ready: false, connected: true,
       joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
     }, { merge: true });
     track("room_join");
@@ -178,7 +179,7 @@ async function enterRoom(code) {
   state.unsubscribers.push(onSnapshot(query(collection(roomRef(), "players"), orderBy("score", "desc")), (snapshot) => {
     state.players = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
     const me = state.players.find((player) => player.uid === state.uid);
-    state.ready = Boolean(me?.ready);
+    state.ready = Boolean(me?.ready) && me?.round === (state.room?.round ?? 0);
     renderPlayers();
     renderScores();
     renderResults();
@@ -191,6 +192,7 @@ function routeRoomPhase() {
   if (!state.room) return;
   if (state.room.phase === "lobby") {
     showScreen("lobbyScreen");
+    syncMyRound();
     renderPlayers();
   } else if (state.room.phase === "playing") {
     showScreen("gameScreen");
@@ -203,9 +205,29 @@ function routeRoomPhase() {
   }
 }
 
+async function syncMyRound() {
+  const me = state.players.find((player) => player.uid === state.uid);
+  const round = state.room?.round ?? 0;
+  if (!me || me.round === round) return;
+  await updateDoc(playerRef(), {
+    round, score: 0, words: 0, ready: false, lastSeenAt: serverTimestamp()
+  }).catch(() => {});
+}
+
+function currentRoundPlayer(player) {
+  const active = player.round === (state.room?.round ?? 0);
+  return {
+    ...player,
+    score: active ? (player.score ?? 0) : 0,
+    words: active ? (player.words ?? 0) : 0,
+    ready: active ? Boolean(player.ready) : false
+  };
+}
+
 function renderPlayers() {
   ui.playerCount.textContent = `${state.players.length} / 4`;
-  ui.lobbyPlayers.replaceChildren(...state.players.map((player, index) => {
+  const players = state.players.map(currentRoundPlayer);
+  ui.lobbyPlayers.replaceChildren(...players.map((player, index) => {
     const card = document.createElement("div");
     card.className = "player-card";
     card.innerHTML = `<div class="avatar">${index + 1}</div><div class="player-meta"><strong></strong><span></span></div><div class="ready-mark"></div>`;
@@ -219,13 +241,14 @@ function renderPlayers() {
   ui.readyButton.textContent = state.ready ? "HAZIR DEĞİLİM" : "HAZIRIM";
   const isHost = state.room?.hostId === state.uid;
   ui.startButton.classList.toggle("hidden", !isHost);
-  ui.startButton.disabled = state.players.length < 2 || state.players.some((player) => !player.ready);
+  ui.startButton.disabled = players.length < 2 || players.some((player) => !player.ready);
   ui.rematchButton.classList.toggle("hidden", !isHost);
 }
 
 function renderScores() {
   if (!state.players.length) return;
-  ui.scoreStrip.replaceChildren(...state.players.slice(0, 3).map((player) => {
+  const players = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score);
+  ui.scoreStrip.replaceChildren(...players.slice(0, 3).map((player) => {
     const pill = document.createElement("div");
     pill.className = "score-pill";
     pill.innerHTML = "<span></span><strong></strong>";
@@ -233,7 +256,7 @@ function renderScores() {
     pill.querySelector("strong").textContent = player.score ?? 0;
     return pill;
   }));
-  const rank = state.players.findIndex((player) => player.uid === state.uid);
+  const rank = players.findIndex((player) => player.uid === state.uid);
   ui.rankText.textContent = rank < 0 ? "–" : `#${rank + 1}`;
 }
 
@@ -293,7 +316,8 @@ async function submitWord() {
       const currentRoom = await transaction.get(roomRef());
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
       if (currentRoom.data().endsAt.toMillis() <= Date.now()) throw new Error("Süre doldu.");
-      const submissionRef = doc(roomRef(), "submissions", word);
+      const round = currentRoom.data().round ?? 0;
+      const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
       transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
       transaction.update(playerRef(), { score: increment(points), words: increment(1), lastSeenAt: serverTimestamp() });
@@ -337,7 +361,8 @@ async function toggleReady() {
 }
 
 async function startMatch() {
-  if (state.room?.hostId !== state.uid || state.players.length < 2 || state.players.some((player) => !player.ready)) return;
+  const players = state.players.map(currentRoundPlayer);
+  if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
   await updateDoc(roomRef(), {
     phase: "playing", letters: createLetters(), endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
   });
@@ -346,7 +371,7 @@ async function startMatch() {
 
 function renderResults() {
   if (!state.players.length) return;
-  const sorted = [...state.players].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const sorted = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score);
   ui.winnerText.textContent = `${sorted[0].name} kazandı!`;
   ui.resultsList.replaceChildren(...sorted.map((player, index) => {
     const row = document.createElement("div");
@@ -356,16 +381,14 @@ function renderResults() {
     row.querySelector("b").textContent = `${player.score ?? 0} puan`;
     return row;
   }));
+  ui.rematchStatus.textContent = state.room?.hostId === state.uid ? "" : "Oda sahibi yeni turu başlatabilir";
 }
 
 async function rematch() {
   if (state.room?.hostId !== state.uid) return;
-  const submissions = await getDocs(collection(roomRef(), "submissions"));
-  const batch = writeBatch(db);
-  submissions.forEach((item) => batch.delete(item.ref));
-  state.players.forEach((player) => batch.update(playerRef(player.uid), { score: 0, words: 0, ready: false }));
-  batch.update(roomRef(), { phase: "lobby", letters: [], endsAt: null, updatedAt: serverTimestamp() });
-  await batch.commit();
+  await updateDoc(roomRef(), {
+    phase: "lobby", round: increment(1), letters: [], endsAt: null, updatedAt: serverTimestamp()
+  });
   state.combo = 0;
   state.recentWords = [];
 }
@@ -398,7 +421,7 @@ function vibrate(pattern) { if (navigator.vibrate) navigator.vibrate(pattern); }
 
 ui.createRoomButton.addEventListener("click", createRoom);
 ui.joinRoomButton.addEventListener("click", joinRoom);
-ui.roomCodeInput.addEventListener("input", () => { ui.roomCodeInput.value = ui.roomCodeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
+ui.roomCodeInput.addEventListener("input", () => { ui.roomCodeInput.value = ui.roomCodeInput.value.replace(/\D/g, "").slice(0, 5); });
 ui.roomCodeInput.addEventListener("keydown", (event) => { if (event.key === "Enter") joinRoom(); });
 ui.copyCodeButton.addEventListener("click", copyCode);
 ui.readyButton.addEventListener("click", toggleReady);
@@ -416,6 +439,8 @@ window.addEventListener("beforeunload", () => { if (state.roomCode) updateDoc(pl
 ui.playerName.value = localStorage.getItem("wra-player-name") ?? "";
 onAuthStateChanged(auth, async (user) => {
   if (!user) return;
+  try { await dictionaryReady; }
+  catch (error) { toast(error.message, true); return; }
   state.uid = user.uid;
   setConnection("online", "Çevrimiçi");
   showScreen("homeScreen");

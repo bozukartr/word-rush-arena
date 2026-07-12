@@ -4,62 +4,51 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
   <meta name="theme-color" content="#090b18">
-  <meta name="description" content="Word Rush Arena — arkadaşlarınla gerçek zamanlı kelime düellosu.">
+  <meta name="description" content="Word Rush Arena — gerçek zamanlı kelime düellosu.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <title>Word Rush Arena</title>
 </head>
 <body>
-  <div class="ambient ambient-a"></div>
-  <div class="ambient ambient-b"></div>
-
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
   <main class="app-shell">
     <header class="brand-bar">
-      <button id="leaveButton" class="icon-button hidden" type="button" aria-label="Odadan çık">×</button>
-      <div class="mini-brand"><span>WORD RUSH</span><strong>ARENA</strong></div>
+      <button id="leaveButton" class="icon-button hidden" type="button" aria-label="Odadan çık">‹</button>
+      <div class="mini-brand"><strong>WRA</strong></div>
       <div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div>
     </header>
 
-    <section id="loadingScreen" class="screen active loading-screen" aria-label="Yükleniyor">
+    <section id="loadingScreen" class="screen active loading-screen">
       <div class="logo-orbit"><span>W</span></div>
-      <p>Firebase oturumu hazırlanıyor…</p>
     </section>
 
     <section id="homeScreen" class="screen home-screen">
-      <div class="hero-copy">
-        <p class="eyebrow">GERÇEK ZAMANLI KELİME DÜELLOSU</p>
-        <h1>Hızlı düşün.<br><em>Kelimeyi kap.</em></h1>
-        <p>Aynı harfler, 75 saniye, tek kazanan. Odanı kur ve arkadaşlarını çağır.</p>
-      </div>
-
+      <div class="home-mark">W</div>
+      <h1>Word Rush</h1>
+      <p class="home-subtitle">75 saniyelik kelime düellosu</p>
       <div class="panel home-panel">
-        <label class="field-label" for="playerName">OYUNCU ADI</label>
-        <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Adını yaz" inputmode="text">
-        <button id="createRoomButton" class="button button-primary" type="button">
-          <span>ODA KUR</span><b>＋</b>
-        </button>
+        <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Oyuncu adı">
+        <button id="createRoomButton" class="button button-primary" type="button">ODA KUR</button>
         <div class="separator"><span>veya</span></div>
-        <label class="field-label" for="roomCodeInput">ODA KODU</label>
         <div class="join-row">
-          <input id="roomCodeInput" class="code-input" maxlength="6" autocomplete="off" placeholder="ABC123" inputmode="text">
+          <input id="roomCodeInput" class="code-input" maxlength="5" autocomplete="off" placeholder="12345" inputmode="numeric" pattern="[0-9]*">
           <button id="joinRoomButton" class="button button-secondary" type="button">KATIL</button>
         </div>
       </div>
-      <p class="fine-print">2–4 oyuncu · Kurulum yok · Telefon ve bilgisayarda oynanır</p>
     </section>
 
     <section id="lobbyScreen" class="screen lobby-screen">
       <div class="room-code-card">
-        <span>ODA KODU</span>
-        <button id="copyCodeButton" type="button" title="Kodu kopyala">
-          <strong id="roomCodeText">------</strong><small>KOPYALA</small>
+        <span>ODA</span>
+        <button id="copyCodeButton" type="button" aria-label="Oda kodunu kopyala">
+          <strong id="roomCodeText">-----</strong><small>⧉</small>
         </button>
       </div>
-      <div class="section-heading"><div><span>OYUNCULAR</span><strong id="playerCount">0 / 4</strong></div><p>Herkes hazır olduğunda maç başlayabilir.</p></div>
+      <div class="section-heading"><div><span>OYUNCULAR</span><strong id="playerCount">0 / 4</strong></div></div>
       <div id="lobbyPlayers" class="player-list"></div>
       <div class="lobby-actions">
         <button id="readyButton" class="button button-primary" type="button">HAZIRIM</button>
-        <button id="startButton" class="button button-gold hidden" type="button" disabled>MAÇI BAŞLAT</button>
+        <button id="startButton" class="button button-gold hidden" type="button" disabled>BAŞLAT</button>
       </div>
     </section>
 
@@ -67,33 +56,30 @@
       <div class="hud">
         <div class="hud-card"><span>SÜRE</span><strong id="timerText">75</strong></div>
         <div class="rank-strip" id="scoreStrip"></div>
-        <div class="hud-card"><span>SIRAN</span><strong id="rankText">–</strong></div>
+        <div class="hud-card"><span>SIRA</span><strong id="rankText">–</strong></div>
       </div>
-
-      <div class="status-line"><span id="gameStatus">Harfleri seç ve kelimeyi gönder</span><b id="comboText"></b></div>
+      <div class="status-line"><span id="gameStatus">Harfleri seç</span><b id="comboText"></b></div>
       <div id="letterGrid" class="letter-grid" aria-label="Harf havuzu"></div>
-
       <div class="word-composer">
-        <div id="currentWord" class="current-word" aria-live="polite"><span>Harfleri seç</span></div>
+        <div id="currentWord" class="current-word" aria-live="polite"><span>Kelime</span></div>
         <div class="composer-tools">
           <button id="backspaceButton" class="icon-button solid" type="button" aria-label="Son harfi sil">⌫</button>
-          <button id="clearButton" class="icon-button solid" type="button" aria-label="Kelimeyi temizle">×</button>
+          <button id="clearButton" class="icon-button solid" type="button" aria-label="Temizle">×</button>
         </div>
       </div>
-      <button id="submitWordButton" class="button button-primary submit-button" type="button" disabled>KELİMEYİ GÖNDER</button>
+      <button id="submitWordButton" class="button button-primary submit-button" type="button" disabled>GÖNDER</button>
       <div id="recentWords" class="recent-words"></div>
     </section>
 
     <section id="resultsScreen" class="screen results-screen">
       <div class="trophy">★</div>
-      <p class="eyebrow">TUR TAMAMLANDI</p>
-      <h2 id="winnerText">Kazanan belli oldu!</h2>
+      <h2 id="winnerText">Kazanan!</h2>
       <div id="resultsList" class="results-list"></div>
-      <button id="rematchButton" class="button button-gold hidden" type="button">YENİDEN OYNA</button>
-      <button id="homeButton" class="button button-secondary" type="button">ANA MENÜ</button>
+      <button id="rematchButton" class="button button-gold hidden" type="button">TEKRAR OYNA</button>
+      <p id="rematchStatus" class="rematch-status"></p>
+      <button id="homeButton" class="text-button" type="button">Ana menü</button>
     </section>
   </main>
-
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>

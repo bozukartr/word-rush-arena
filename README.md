@@ -5,13 +5,14 @@ Firebase Hosting ve Firestore üzerinde çalışan, yalnızca HTML, CSS ve taray
 ## Özellikler
 
 - 2–4 oyunculu özel oda
-- 6 karakterli oda kodu
+- Yalnızca rakamlardan oluşan 5 haneli oda kodu
 - Anonim Firebase Authentication
 - Firestore gerçek zamanlı lobi, skor ve maç durumu
 - 75 saniyelik tur
 - Dokunmatik harf seçimi ve mobil safe-area desteği
 - Tek kelimeyi ilk bulan oyuncuya atomik sahiplik
-- Yeniden oynama
+- Ana menüye dönmeden güvenli yeni tur / tekrar oynama
+- TDD `tr_TR` Hunspell sözlüğünden türetilmiş yaklaşık 76 bin kök kelime
 
 ## Firebase ayarları
 
@@ -21,6 +22,10 @@ Proje kimliği `.firebaserc` içinde `wordrusharena` olarak ayarlıdır. Firebas
 2. Firestore Database
 3. Hosting
 4. App Check kullanılıyorsa `firebase-config.js` içindeki `appCheckSiteKey`
+
+## Türkçe sözlük
+
+`tr_words.txt`, [tdd-ai/hunspell-tr](https://github.com/tdd-ai/hunspell-tr) sözlüğünden türetilmiş kök kelime listesidir. Kaynak ve lisans ayrıntıları `NOTICE.md` ve `LICENSE-MPL-2.0.txt` dosyalarındadır.
 
 ## Yerel çalıştırma
 
