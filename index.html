@@ -54,6 +54,13 @@
         <span class="tile tile--xl" style="--r:5deg">A<i>1</i></span>
       </div>
       <p class="hero-line">Kelimeni kur, rakibini geç. <b>75 saniyen</b> var.</p>
+      <div id="rejoinBanner" class="round-recap rejoin-banner hidden">
+        <div class="recap-row"><span>Az önce ayrıldığın oda hâlâ açık</span><strong id="rejoinCode">–</strong></div>
+        <div class="lobby-actions">
+          <button id="rejoinDismissButton" class="btn btn--ghost" type="button">Kapat</button>
+          <button id="rejoinButton" class="btn btn--flood" type="button">GERİ DÖN</button>
+        </div>
+      </div>
       <div class="panel home-panel">
         <button id="googleLoginButton" class="btn btn--google" type="button"><span>G</span> GOOGLE İLE GİRİŞ</button>
         <button id="guestLoginButton" class="btn btn--ghost" type="button">MİSAFİR OYNA</button>
@@ -206,6 +213,16 @@
       <strong id="quickMatchTitle">RAKİP ARANIYOR</strong>
       <p id="quickMatchTimer" class="quick-match-timer">0 sn</p>
       <button id="cancelQuickMatchButton" class="btn btn--ghost" type="button">İPTAL ET</button>
+    </div>
+  </div>
+  <div id="confirmOverlay" class="quick-match-overlay hidden" role="dialog" aria-modal="true" aria-label="Onay">
+    <div class="quick-match-modal">
+      <strong id="confirmTitle">Emin misin?</strong>
+      <p id="confirmMessage" class="quick-match-timer"></p>
+      <div class="lobby-actions">
+        <button id="confirmCancelButton" class="btn btn--ghost" type="button">Vazgeç</button>
+        <button id="confirmOkButton" class="btn btn--flood" type="button">Çık</button>
+      </div>
     </div>
   </div>
   <script type="module" src="app.js"></script>
