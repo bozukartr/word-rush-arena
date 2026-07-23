@@ -36,7 +36,6 @@
         <button id="googleLoginButton" class="button google-button" type="button"><span>G</span> GOOGLE İLE GİRİŞ</button>
         <button id="guestLoginButton" class="button button-secondary guest-button" type="button">MİSAFİR OYNA</button>
         <button id="quickMatchButton" class="button button-gold" type="button" disabled>QUICK MATCH</button>
-        <p id="quickMatchStatus" class="quick-match-status"></p>
         <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Oyuncu adı">
         <button id="createRoomButton" class="button button-primary" type="button">ODA KUR</button>
         <div class="separator"><span>veya</span></div>
@@ -136,12 +135,18 @@
           <div id="attackTargets" class="attack-targets"></div>
         </div>
       </div>
+      <div id="countdownOverlay" class="countdown-overlay hidden" aria-live="assertive">
+        <span id="countdownSubtext" class="countdown-subtext">HAZIR OL</span>
+        <div id="countdownNumber" class="countdown-number">3</div>
+      </div>
     </section>
 
     <section id="resultsScreen" class="screen results-screen">
       <div class="trophy">★</div>
+      <span class="results-eyebrow">TUR SONUÇLARI</span>
       <h2 id="winnerText">Kazanan!</h2>
       <p id="rewardText" class="reward-text"></p>
+      <div id="podium" class="podium"></div>
       <div id="resultsList" class="results-list"></div>
       <div id="roundRecap" class="round-recap hidden">
         <div class="recap-row"><span>EN UZUN KELİME</span><strong id="recapLongest">–</strong></div>
@@ -168,6 +173,18 @@
     <div class="invite-actions">
       <button id="inviteJoinButton" type="button">KATIL</button>
       <button id="inviteDismissButton" class="ghost" type="button">Kapat</button>
+    </div>
+  </div>
+  <div id="quickMatchOverlay" class="quick-match-overlay hidden" role="dialog" aria-modal="true" aria-label="Rakip aranıyor">
+    <div class="quick-match-modal">
+      <div class="radar">
+        <span class="radar-ring"></span>
+        <span class="radar-ring"></span>
+        <span class="radar-core">⚡</span>
+      </div>
+      <strong id="quickMatchTitle">RAKİP ARANIYOR</strong>
+      <p id="quickMatchTimer" class="quick-match-timer">0 sn</p>
+      <button id="cancelQuickMatchButton" class="button button-secondary" type="button">İPTAL ET</button>
     </div>
   </div>
   <script type="module" src="app.js"></script>

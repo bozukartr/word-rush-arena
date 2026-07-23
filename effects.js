@@ -132,6 +132,14 @@ export function timerPulse(element, remaining) {
   if (remaining <= 5) playSound("tick");
 }
 
+export function countdownPulse(element) {
+  if (!element) return;
+  if (motionAllowed()) {
+    animate(element, { transform: ["scale(.4)", "scale(1.14)", "scale(1)"], opacity: [0, 1, 1] }, { duration: .38, ease: [0.22, 1, 0.36, 1] });
+  }
+  playSound("tick");
+}
+
 export function attackFlash() {
   const flash = document.createElement("div");
   flash.className = "attack-flash";
