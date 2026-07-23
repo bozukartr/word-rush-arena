@@ -133,6 +133,14 @@ service cloud.firestore {
             || request.resource.data.round > resource.data.round);
         allow delete: if isHost(code);
       }
+
+      match /rounds/{roundNumber} {
+        allow read: if isPlayer(code);
+        allow create, update: if isHost(code)
+          && request.resource.data.round is int
+          && request.resource.data.players is list;
+        allow delete: if isHost(code);
+      }
     }
 
     match /profiles/{uid} {
@@ -179,6 +187,12 @@ service cloud.firestore {
               || (request.resource.data.lastAction.type == 'reward' && validRoundReward(uid))
               || (request.resource.data.lastAction.type == 'market' && validMarketPurchase())
             )
+          ) || (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['longestWord', 'bestScore', 'bestScoreWord', 'updatedAt'])
+            && request.resource.data.get('longestWord', '') is string
+            && request.resource.data.get('bestScore', 0) is int
+            && request.resource.data.get('bestScoreWord', '') is string
           )
         );
       allow delete: if false;
@@ -225,6 +239,15 @@ service cloud.firestore {
         )
       );
       allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /invites/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn()
+        && request.resource.data.fromUid == request.auth.uid
+        && request.resource.data.roomCode is string;
+      allow update: if false;
+      allow delete: if signedIn() && (request.auth.uid == uid || request.auth.uid == resource.data.fromUid);
     }
 
     match /{document=**} { allow read, write: if false; }

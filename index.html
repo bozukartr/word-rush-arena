@@ -73,6 +73,11 @@
           <div><span>◆</span><b id="profileCoins">0</b><small>JETON</small></div>
           <div class="diamond"><span>◇</span><b id="profileDiamonds">0</b><small>ELMAS</small></div>
         </div>
+        <div class="profile-stats">
+          <div class="stat-row"><span>GALİBİYET</span><strong id="profileWins">0</strong></div>
+          <div class="stat-row"><span>EN UZUN KELİME</span><strong id="profileLongestWord">–</strong></div>
+          <div class="stat-row"><span>EN YÜKSEK PUANLI KELİME</span><strong id="profileBestWord">–</strong></div>
+        </div>
       </div>
       <div class="friend-add">
         <input id="friendCodeInput" maxlength="12" autocomplete="off" placeholder="ARKADAŞ KODU">
@@ -93,9 +98,16 @@
       </div>
       <div class="section-heading"><div><span>OYUNCULAR</span><strong id="playerCount">0 / 4</strong></div></div>
       <div id="lobbyPlayers" class="player-list"></div>
+      <button id="inviteFriendButton" class="text-button" type="button">+ Arkadaş davet et</button>
       <div class="lobby-actions">
         <button id="readyButton" class="button button-primary" type="button">HAZIRIM</button>
         <button id="startButton" class="button button-gold hidden" type="button" disabled>BAŞLAT</button>
+      </div>
+      <div id="invitePicker" class="attack-picker hidden" role="dialog" aria-modal="true" aria-label="Arkadaş davet et">
+        <div class="attack-sheet">
+          <div class="attack-sheet-head"><strong>ARKADAŞINI DAVET ET</strong><button id="closeInviteButton" class="icon-button solid" type="button" aria-label="Kapat">×</button></div>
+          <div id="inviteFriendTargets" class="attack-targets"></div>
+        </div>
       </div>
     </section>
 
@@ -131,6 +143,15 @@
       <h2 id="winnerText">Kazanan!</h2>
       <p id="rewardText" class="reward-text"></p>
       <div id="resultsList" class="results-list"></div>
+      <div id="roundRecap" class="round-recap hidden">
+        <div class="recap-row"><span>EN UZUN KELİME</span><strong id="recapLongest">–</strong></div>
+        <div class="recap-row"><span>EN YÜKSEK PUAN</span><strong id="recapTopScore">–</strong></div>
+        <p id="recapTotal" class="recap-total"></p>
+      </div>
+      <div id="seriesRecap" class="series-recap hidden">
+        <span>SERİ</span>
+        <div id="seriesList" class="series-list"></div>
+      </div>
       <button id="rematchButton" class="button button-gold hidden" type="button">TEKRAR OYNA</button>
       <p id="rematchStatus" class="rematch-status"></p>
       <button id="homeButton" class="text-button" type="button">Ana menü</button>
@@ -142,6 +163,13 @@
     <button id="navProfile" type="button"><i>●</i><span>PROFİL</span></button>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="inviteBanner" class="invite-banner hidden" role="status" aria-live="polite">
+    <span id="inviteText"></span>
+    <div class="invite-actions">
+      <button id="inviteJoinButton" type="button">KATIL</button>
+      <button id="inviteDismissButton" class="ghost" type="button">Kapat</button>
+    </div>
+  </div>
   <script type="module" src="app.js"></script>
 </body>
 </html>

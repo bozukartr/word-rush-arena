@@ -138,9 +138,25 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(120, 87, 2
 .rematch-status { min-height: 18px; margin: 13px 0 0; color: var(--muted); font-size: 12px; }
 .text-button { min-height: 44px; margin-top: 5px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
 
+.round-recap { display: grid; gap: 6px; margin-bottom: 14px; padding: 12px 14px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; }
+.recap-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--muted); }
+.recap-row strong { color: var(--text); font-weight: 900; font-size: 13px; text-align: right; }
+.recap-total { margin: 2px 0 0; color: var(--muted); font-size: 11px; text-align: right; }
+.series-recap { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 14px; background: rgba(120, 87, 255, .09); border: 1px solid rgba(151, 126, 255, .22); border-radius: 999px; }
+.series-recap > span { color: var(--gold); font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.series-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.series-chip { padding: 4px 10px; border-radius: 999px; background: rgba(255, 255, 255, .08); font-size: 11px; font-weight: 800; }
+
 .toast { position: fixed; z-index: 10; left: 50%; bottom: calc(22px + var(--safe-bottom)); transform: translate(-50%, 20px); width: min(calc(100% - 36px), 520px); padding: 13px 16px; text-align: center; color: white; background: rgba(30, 34, 60, .96); border: 1px solid var(--line); border-radius: 15px; opacity: 0; pointer-events: none; transition: .2s; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { border-color: rgba(255, 102, 138, .55); }
+
+.invite-banner { position: fixed; z-index: 40; left: 50%; top: calc(14px + var(--safe-top)); transform: translate(-50%, -140%); width: min(calc(100% - 32px), 480px); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; color: white; background: linear-gradient(135deg, rgba(120, 87, 255, .95), rgba(162, 77, 255, .95)); border: 1px solid rgba(255, 255, 255, .16); border-radius: 16px; box-shadow: 0 18px 44px rgba(0, 0, 0, .32); transition: transform .22s ease-out; }
+.invite-banner:not(.hidden) { transform: translate(-50%, 0); }
+.invite-banner span { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; }
+.invite-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.invite-actions button { padding: 0 12px; min-height: 34px; border: 0; border-radius: 11px; font-size: 11px; font-weight: 900; cursor: pointer; color: #241a45; background: #fff; }
+.invite-actions button.ghost { color: #fff; background: rgba(255, 255, 255, .16); }
 
 @media (min-width: 560px) {
   .letter-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
@@ -193,6 +209,10 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 4px rgba(120, 87, 2
 .profile-wallet > div.diamond { color: #8ff5ff; background: rgba(91, 221, 255, .08); }
 .profile-wallet b { font-size: 19px; }
 .profile-wallet small { grid-column: 1 / -1; color: var(--muted); font-size: 8px; letter-spacing: .1em; }
+.profile-stats { display: grid; gap: 6px; margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line); text-align: left; }
+.stat-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stat-row span { color: var(--muted); font-size: 10px; letter-spacing: .06em; }
+.stat-row strong { font-size: 13px; font-weight: 900; text-align: right; }
 .friend-add { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 12px 0; }
 .friend-add input { min-width: 0; text-transform: uppercase; }
 .friend-add button, .friend-row button { padding: 0 14px; border: 0; border-radius: 14px; color: #fff; background: var(--purple); font-size: 10px; font-weight: 900; cursor: pointer; }

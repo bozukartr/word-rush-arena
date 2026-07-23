@@ -50,7 +50,11 @@ const ui = Object.fromEntries([
   "effectsCanvas", "bottomNav", "navPlay", "navMarket", "navProfile", "marketGrid", "marketBackButton",
   "marketCoins", "marketDiamonds", "soundToggle",
   "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
-  "rematchButton", "rematchStatus", "homeButton", "toast"
+  "rematchButton", "rematchStatus", "homeButton", "toast",
+  "roundRecap", "recapLongest", "recapTopScore", "recapTotal", "seriesRecap", "seriesList",
+  "inviteFriendButton", "invitePicker", "inviteFriendTargets", "closeInviteButton",
+  "inviteBanner", "inviteText", "inviteJoinButton", "inviteDismissButton",
+  "profileWins", "profileLongestWord", "profileBestWord"
 ].map((id) => [id, $(id)]));
 
 const dictionaryReady = loadDictionary();
@@ -151,6 +155,12 @@ const state = {
   lastTimerSecond: null,
   profileUnsubscriber: null,
   friendsUnsubscriber: null,
+  inviteUnsubscriber: null,
+  pendingInvite: null,
+  roundHistory: [],
+  roundRecap: null,
+  roundRecapRound: null,
+  roundHistoryRecorded: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -204,6 +214,7 @@ async function ensureProfile(user = auth.currentUser) {
         coins: 0, diamonds: 0, wins: 0, inventory: { a_lock: 0 },
         ownedThemes: ["default"], activeTheme: "default", lastAction: null, friendCode,
         displayName, photoURL: user.photoURL ?? "",
+        longestWord: "", bestScore: 0, bestScoreWord: "",
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
     } else {
@@ -242,6 +253,13 @@ async function ensureProfile(user = auth.currentUser) {
     ui.profileCode.textContent = state.profile?.friendCode ?? friendCode;
     ui.profileCoins.textContent = state.coins;
     ui.profileDiamonds.textContent = state.diamonds;
+    ui.profileWins.textContent = state.wins;
+    ui.profileLongestWord.textContent = state.profile?.longestWord
+      ? state.profile.longestWord.toLocaleUpperCase("tr-TR")
+      : "–";
+    ui.profileBestWord.textContent = state.profile?.bestScoreWord
+      ? `${state.profile.bestScoreWord.toLocaleUpperCase("tr-TR")} · +${state.profile.bestScore ?? 0}`
+      : "–";
     ui.marketCoins.textContent = state.coins;
     ui.marketDiamonds.textContent = state.diamonds;
     ui.profileAvatar.src = state.profile?.photoURL || "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' rx='40' fill='%237c63ff'/%3E%3Ctext x='40' y='52' text-anchor='middle' fill='white' font-size='34'%3EW%3C/text%3E%3C/svg%3E";
@@ -252,6 +270,7 @@ async function ensureProfile(user = auth.currentUser) {
     renderMarket();
   });
   subscribeFriendships();
+  subscribeInvite();
 }
 
 function friendshipId(uidA, uidB) { return [uidA, uidB].sort().join("_"); }
@@ -324,6 +343,73 @@ async function addFriend() {
 async function acceptFriend(id) {
   await updateDoc(doc(db, "friendships", id), { status: "accepted", updatedAt: serverTimestamp() });
   toast("Arkadaş eklendi.");
+}
+
+function subscribeInvite() {
+  state.inviteUnsubscriber?.();
+  state.inviteUnsubscriber = onSnapshot(doc(db, "invites", state.uid), (snapshot) => {
+    const invite = snapshot.data();
+    if (!invite) { hideInviteBanner(); return; }
+    showInviteBanner(invite);
+  });
+}
+
+function showInviteBanner(invite) {
+  state.pendingInvite = invite;
+  ui.inviteText.textContent = `${invite.fromName ?? "Bir arkadaşın"} seni bir odaya davet etti.`;
+  ui.inviteBanner.classList.remove("hidden");
+}
+
+function hideInviteBanner() {
+  state.pendingInvite = null;
+  ui.inviteBanner.classList.add("hidden");
+}
+
+async function acceptInvite() {
+  const invite = state.pendingInvite;
+  if (!invite) return;
+  hideInviteBanner();
+  await deleteDoc(doc(db, "invites", state.uid)).catch(() => {});
+  try {
+    if (state.roomCode && state.roomCode !== invite.roomCode) await leaveRoom();
+    await joinRoomByCode(invite.roomCode);
+    track("invite_accept");
+  } catch (error) { toast(error.message, true); }
+}
+
+function dismissInvite() {
+  hideInviteBanner();
+  deleteDoc(doc(db, "invites", state.uid)).catch(() => {});
+}
+
+function openInvitePicker() {
+  if (!state.roomCode) return;
+  const accepted = state.friendships.filter((item) => item.status === "accepted");
+  if (!accepted.length) { toast("Önce arkadaş eklemelisin.", true); return; }
+  ui.inviteFriendTargets.replaceChildren(...accepted.map((item) => {
+    const person = friendIdentity(item);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "attack-target";
+    button.textContent = person.name;
+    button.addEventListener("click", () => sendRoomInvite(person));
+    return button;
+  }));
+  ui.invitePicker.classList.remove("hidden");
+}
+
+async function sendRoomInvite(person) {
+  if (!state.roomCode || !person.uid) return;
+  try {
+    await setDoc(doc(db, "invites", person.uid), {
+      fromUid: state.uid,
+      fromName: state.profile?.displayName ?? "Oyuncu",
+      roomCode: state.roomCode,
+      createdAt: serverTimestamp()
+    });
+    ui.invitePicker.classList.add("hidden");
+    toast(`${person.name} davet edildi.`);
+  } catch (error) { toast(error.message, true); }
 }
 
 function renderMarket() {
@@ -556,24 +642,28 @@ async function createRoom() {
   finally { setBusy(false); }
 }
 
+async function joinRoomByCode(code) {
+  const name = cleanName();
+  const ref = roomRef(code);
+  const snapshot = await getDoc(ref);
+  if (!snapshot.exists()) throw new Error("Oda bulunamadı.");
+  if (snapshot.data().phase !== "lobby") throw new Error("Bu odada maç başlamış.");
+  const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
+  if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
+  await setDoc(playerRef(state.uid, code), {
+    name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1,
+    attackUsedRound: -1, rewardedRound: -1, ready: false, connected: true,
+    joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
+  }, { merge: true });
+  await enterRoom(code);
+}
+
 async function joinRoom() {
   try {
     setBusy(true);
-    const name = cleanName();
     const code = cleanCode();
-    const ref = roomRef(code);
-    const snapshot = await getDoc(ref);
-    if (!snapshot.exists()) throw new Error("Oda bulunamadı.");
-    if (snapshot.data().phase !== "lobby") throw new Error("Bu odada maç başlamış.");
-    const playerSnapshots = await getDocs(query(collection(ref, "players"), limit(5)));
-    if (playerSnapshots.size >= 4 && !playerSnapshots.docs.some((item) => item.id === state.uid)) throw new Error("Oda dolu.");
-    await setDoc(playerRef(state.uid, code), {
-      name, score: 0, words: 0, round: snapshot.data().round ?? 0, letters: [], letterBag: [], boardVersion: 0, boardRound: -1,
-      attackUsedRound: -1, rewardedRound: -1, ready: false, connected: true,
-      joinedAt: serverTimestamp(), lastSeenAt: serverTimestamp()
-    }, { merge: true });
+    await joinRoomByCode(code);
     track("room_join");
-    await enterRoom(code);
   } catch (error) { toast(error.message, true); }
   finally { setBusy(false); }
 }
@@ -609,6 +699,10 @@ async function enterRoom(code) {
   state.effects = [];
   state.blockedActive = false;
   state.finishing = false;
+  state.roundHistory = [];
+  state.roundRecap = null;
+  state.roundRecapRound = null;
+  state.roundHistoryRecorded = null;
   ui.attackPicker.classList.add("hidden");
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
@@ -637,6 +731,10 @@ async function enterRoom(code) {
   state.unsubscribers.push(onSnapshot(collection(roomRef(), "effects"), (snapshot) => {
     state.effects = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
     refreshBlockedLetters(true);
+  }));
+  state.unsubscribers.push(onSnapshot(query(collection(roomRef(), "rounds"), orderBy("round")), (snapshot) => {
+    state.roundHistory = snapshot.docs.map((item) => item.data());
+    renderResults();
   }));
   clearInterval(state.heartbeat);
   updateDoc(playerRef(), { connected: true, lastSeenAt: serverTimestamp() }).catch(() => {});
@@ -672,6 +770,46 @@ function routeRoomPhase() {
     showScreen("resultsScreen");
     renderResults();
     awardRound();
+    loadRoundRecap();
+    recordRoundHistory();
+  }
+}
+
+async function loadRoundRecap() {
+  const round = state.room?.round ?? 0;
+  if (state.roundRecapRound === round) return;
+  state.roundRecapRound = round;
+  try {
+    const snapshot = await getDocs(query(collection(roomRef(), "submissions"), where("round", "==", round)));
+    let longest = null;
+    let topScore = null;
+    for (const item of snapshot.docs) {
+      const data = item.data();
+      if (!longest || [...data.word].length > [...longest.word].length) longest = data;
+      if (!topScore || data.points > topScore.points) topScore = data;
+    }
+    state.roundRecap = { round, longest, topScore, total: snapshot.size };
+  } catch (error) {
+    state.roundRecap = null;
+  }
+  renderResults();
+}
+
+async function recordRoundHistory() {
+  if (state.room?.hostId !== state.uid || !state.roomCode) return;
+  const round = state.room?.round ?? 0;
+  if (state.roundHistoryRecorded === round) return;
+  state.roundHistoryRecorded = round;
+  const sorted = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score);
+  try {
+    await setDoc(doc(roomRef(), "rounds", String(round)), {
+      round,
+      winnerId: state.room?.winnerId ?? null,
+      players: sorted.map((player) => ({ uid: player.uid, name: player.name, score: player.score ?? 0 })),
+      createdAt: serverTimestamp()
+    });
+  } catch (error) {
+    state.roundHistoryRecorded = null;
   }
 }
 
@@ -1012,7 +1150,7 @@ async function submitWord() {
       ensureMinimumVowels(nextLetters, liveBag, 3, selectedIndexes);
       refreshedLetters = nextLetters;
       refreshedBag = liveBag;
-      transaction.set(submissionRef, { word, ownerId: state.uid, points, createdAt: serverTimestamp() });
+      transaction.set(submissionRef, { word, ownerId: state.uid, points, round, createdAt: serverTimestamp() });
       transaction.update(playerRef(), {
         letters: nextLetters,
         letterBag: liveBag,
@@ -1022,6 +1160,19 @@ async function submitWord() {
         words: increment(1),
         lastSeenAt: serverTimestamp()
       });
+      const profileSnapshot = await transaction.get(profileRef());
+      if (profileSnapshot.exists()) {
+        const profileData = profileSnapshot.data();
+        const profileUpdate = {};
+        if ([...word].length > [...(profileData.longestWord ?? "")].length) profileUpdate.longestWord = word;
+        if (points > (profileData.bestScore ?? 0)) {
+          profileUpdate.bestScore = points;
+          profileUpdate.bestScoreWord = word;
+        }
+        if (Object.keys(profileUpdate).length) {
+          transaction.update(profileRef(), { ...profileUpdate, updatedAt: serverTimestamp() });
+        }
+      }
     });
     state.playerLetters = refreshedLetters ?? state.playerLetters;
     state.playerBag = refreshedBag ?? state.playerBag;
@@ -1122,6 +1273,47 @@ function renderResults() {
     return row;
   }));
   ui.rematchStatus.textContent = state.room?.hostId === state.uid ? "" : "Oda sahibi yeni turu başlatabilir";
+  renderRoundRecap();
+  renderSeriesRecap();
+}
+
+function playerName(uid) {
+  return state.players.find((player) => player.uid === uid)?.name ?? "Oyuncu";
+}
+
+function renderRoundRecap() {
+  if (!ui.roundRecap) return;
+  const recap = state.roundRecap;
+  const active = recap && recap.round === (state.room?.round ?? 0) && (recap.longest || recap.topScore);
+  ui.roundRecap.classList.toggle("hidden", !active);
+  if (!active) return;
+  ui.recapLongest.textContent = recap.longest
+    ? `${recap.longest.word.toLocaleUpperCase("tr-TR")} · ${playerName(recap.longest.ownerId)}`
+    : "–";
+  ui.recapTopScore.textContent = recap.topScore
+    ? `${recap.topScore.word.toLocaleUpperCase("tr-TR")} · +${recap.topScore.points} · ${playerName(recap.topScore.ownerId)}`
+    : "–";
+  ui.recapTotal.textContent = `${recap.total} kelime bulundu`;
+}
+
+function renderSeriesRecap() {
+  if (!ui.seriesRecap) return;
+  if (state.roundHistory.length < 2) { ui.seriesRecap.classList.add("hidden"); return; }
+  const wins = {};
+  for (const round of state.roundHistory) {
+    if (!round.winnerId) continue;
+    wins[round.winnerId] = (wins[round.winnerId] ?? 0) + 1;
+  }
+  const seriesPlayers = state.players
+    .map((player) => ({ uid: player.uid, name: player.name, wins: wins[player.uid] ?? 0 }))
+    .sort((a, b) => b.wins - a.wins);
+  ui.seriesRecap.classList.remove("hidden");
+  ui.seriesList.replaceChildren(...seriesPlayers.map((player) => {
+    const chip = document.createElement("span");
+    chip.className = "series-chip";
+    chip.textContent = `${player.name} ${player.wins}`;
+    return chip;
+  }));
 }
 
 async function awardRound() {
@@ -1196,7 +1388,8 @@ async function leaveRoom() {
   Object.assign(state, {
     roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false,
     boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false,
-    effects: [], blockedActive: false, rewarding: false, finishing: false
+    effects: [], blockedActive: false, rewarding: false, finishing: false,
+    roundHistory: [], roundRecap: null, roundRecapRound: null, roundHistoryRecorded: null
   });
   ui.attackPicker.classList.add("hidden");
   showScreen("homeScreen");
@@ -1236,7 +1429,9 @@ async function logout() {
   }
   state.profileUnsubscriber?.();
   state.friendsUnsubscriber?.();
+  state.inviteUnsubscriber?.();
   state.matchmakingUnsubscriber?.();
+  hideInviteBanner();
   await signOut(auth);
 }
 
@@ -1265,6 +1460,10 @@ ui.readyButton.addEventListener("click", toggleReady);
 ui.startButton.addEventListener("click", startMatch);
 ui.attackButton.addEventListener("click", openAttackPicker);
 ui.closeAttackButton.addEventListener("click", () => ui.attackPicker.classList.add("hidden"));
+ui.inviteFriendButton.addEventListener("click", openInvitePicker);
+ui.closeInviteButton.addEventListener("click", () => ui.invitePicker.classList.add("hidden"));
+ui.inviteJoinButton.addEventListener("click", acceptInvite);
+ui.inviteDismissButton.addEventListener("click", dismissInvite);
 ui.shuffleButton.addEventListener("click", shuffleLetters);
 ui.backspaceButton.addEventListener("click", backspace);
 ui.clearButton.addEventListener("click", clearWord);
