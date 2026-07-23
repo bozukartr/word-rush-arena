@@ -84,7 +84,12 @@ service cloud.firestore {
         && request.resource.data.phase == 'lobby';
       allow update: if isPlayer(code) && (
         isHost(code) ||
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']) ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hostId', 'updatedAt'])
+          && request.resource.data.hostId == request.auth.uid
+          && get(/databases/$(database)/documents/rooms/$(code)/players/$(resource.data.hostId)).data.connected == false
+        )
       );
       allow delete: if isHost(code);
 
