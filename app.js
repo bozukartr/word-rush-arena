@@ -1142,6 +1142,7 @@ async function submitWord() {
       const round = roomData.round ?? 0;
       const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
+      const profileSnapshot = await transaction.get(profileRef());
       const nextLetters = [...liveLetters];
       for (const index of selectedIndexes) {
         topUpBag(liveBag, nextLetters);
@@ -1160,7 +1161,6 @@ async function submitWord() {
         words: increment(1),
         lastSeenAt: serverTimestamp()
       });
-      const profileSnapshot = await transaction.get(profileRef());
       if (profileSnapshot.exists()) {
         const profileData = profileSnapshot.data();
         const profileUpdate = {};
