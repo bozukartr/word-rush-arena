@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-  <meta name="theme-color" content="#090b18">
+  <meta name="theme-color" content="#0A0F12">
   <meta name="description" content="Word Rush Arena — gerçek zamanlı kelime düellosu.">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
@@ -11,57 +11,79 @@
 </head>
 <body>
   <canvas id="effectsCanvas" class="effects-canvas" aria-hidden="true"></canvas>
-  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5c0-1.1 1.2-1.8 2.2-1.2l11 6.5a1.4 1.4 0 0 1 0 2.4l-11 6.5A1.4 1.4 0 0 1 7 17.5v-13Z" fill="currentColor"/></symbol>
+    <symbol id="i-shop" viewBox="0 0 24 24"><path d="M7 8V6a5 5 0 0 1 10 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4" y="8" width="16" height="12" rx="3.4" fill="currentColor"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="7.6" r="3.6" fill="currentColor"/><path d="M4 20.2c0-4 3.6-6.2 8-6.2s8 2.2 8 6.2v.6H4v-.6Z" fill="currentColor"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 4 7 12l8 8" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M5 5l14 14M19 5 5 19" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 6h3.6L15 17h3M3 18h3.6l2.2-2.9M14 6h4V3.6M18 6l-3.4-3.4M18 18v2.4M18 18l-3.4 3.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-backspace" viewBox="0 0 24 24"><path d="M9 5H19a1.6 1.6 0 0 1 1.6 1.6v10.8A1.6 1.6 0 0 1 19 19H9l-6-7 6-7Z" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linejoin="round"/><path d="M11.2 9.5l5 5m0-5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor"/><circle cx="12" cy="12" r="6.1" fill="none" stroke="black" stroke-width="1.1" opacity=".18"/></symbol>
+    <symbol id="i-gem" viewBox="0 0 24 24"><path d="M6 3h12l4 6-10 12L2 9l4-6Z" fill="currentColor"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 24 24"><path d="M3 8.5 7 11l5-6 5 6 4-2.5-1.6 9.5H4.6L3 8.5Z" fill="currentColor"/><rect x="4.6" y="18" width="14.8" height="2.3" rx="1" fill="currentColor"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" fill="currentColor"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 19.5 6.5" stroke="currentColor" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 16H4.6A1.6 1.6 0 0 1 3 14.4V4.6A1.6 1.6 0 0 1 4.6 3h9.8A1.6 1.6 0 0 1 16 4.6V5" stroke="currentColor" stroke-width="1.8" fill="none"/></symbol>
+  </svg>
+
   <main class="app-shell">
-    <header class="brand-bar">
-      <button id="leaveButton" class="icon-button hidden" type="button" aria-label="Odadan çık">‹</button>
-      <div class="mini-brand"><strong>WRA</strong></div>
+    <header class="topbar">
+      <button id="leaveButton" class="icon-btn hidden" type="button" aria-label="Odadan çık"><svg class="ic"><use href="#i-back"/></svg></button>
+      <div class="brandmark"><span class="mtile">W</span><span class="mtile">R</span><span class="mtile">A</span></div>
       <div class="header-status">
-        <div id="diamondBadge" class="diamond-badge hidden">◇ <b id="diamondText">0</b></div>
-        <div id="coinBadge" class="coin-badge hidden">◆ <b id="coinText">0</b></div>
-        <button id="profileButton" class="profile-button hidden" type="button" aria-label="Profil">●</button>
+        <div id="diamondBadge" class="diamond-badge hidden"><svg class="ic"><use href="#i-gem"/></svg><b id="diamondText">0</b></div>
+        <div id="coinBadge" class="coin-badge hidden"><svg class="ic"><use href="#i-coin"/></svg><b id="coinText">0</b></div>
+        <button id="profileButton" class="profile-btn hidden" type="button" aria-label="Profil"><svg class="ic"><use href="#i-user"/></svg></button>
         <div id="connectionBadge" class="connection-badge" aria-live="polite"><i></i><span>Bağlanıyor</span></div>
       </div>
     </header>
 
     <section id="loadingScreen" class="screen active loading-screen">
-      <div class="logo-orbit"><span>W</span></div>
+      <div class="loading-tiles" aria-hidden="true"><span class="mtile">W</span><span class="mtile">R</span><span class="mtile">A</span></div>
     </section>
 
     <section id="homeScreen" class="screen home-screen">
-      <div class="home-mark">W</div>
-      <h1>Word Rush</h1>
-      <p class="home-subtitle">75 saniyelik kelime düellosu</p>
+      <div class="hero-tiles" aria-hidden="true">
+        <span class="tile tile--xl" style="--r:-6deg">O<i>1</i></span>
+        <span class="tile tile--xl" style="--r:3deg">Y<i>3</i></span>
+        <span class="tile tile--xl" style="--r:-3deg">N<i>1</i></span>
+        <span class="tile tile--xl" style="--r:5deg">A<i>1</i></span>
+      </div>
+      <p class="hero-line">Kelimeni kur, rakibini geç. <b>75 saniyen</b> var.</p>
       <div class="panel home-panel">
-        <button id="googleLoginButton" class="button google-button" type="button"><span>G</span> GOOGLE İLE GİRİŞ</button>
-        <button id="guestLoginButton" class="button button-secondary guest-button" type="button">MİSAFİR OYNA</button>
-        <button id="quickMatchButton" class="button button-gold" type="button" disabled>QUICK MATCH</button>
+        <button id="googleLoginButton" class="btn btn--google" type="button"><span>G</span> GOOGLE İLE GİRİŞ</button>
+        <button id="guestLoginButton" class="btn btn--ghost" type="button">MİSAFİR OYNA</button>
+        <button id="quickMatchButton" class="btn btn--flood btn--lg" type="button" disabled><svg class="ic"><use href="#i-target"/></svg>QUICK MATCH</button>
         <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Oyuncu adı">
-        <button id="createRoomButton" class="button button-primary" type="button">ODA KUR</button>
+        <button id="createRoomButton" class="btn btn--ghost" type="button">ODA KUR</button>
         <div class="separator"><span>veya</span></div>
         <div class="join-row">
           <input id="roomCodeInput" class="code-input" maxlength="5" autocomplete="off" placeholder="12345" inputmode="numeric" pattern="[0-9]*">
-          <button id="joinRoomButton" class="button button-secondary" type="button">KATIL</button>
+          <button id="joinRoomButton" class="btn btn--ghost" type="button">KATIL</button>
         </div>
       </div>
     </section>
 
     <section id="marketScreen" class="screen market-screen">
       <div class="market-head">
-        <button id="marketBackButton" class="icon-button solid" type="button" aria-label="Geri">‹</button>
+        <button id="marketBackButton" class="icon-btn" type="button" aria-label="Geri"><svg class="ic"><use href="#i-back"/></svg></button>
         <div><span>MAĞAZA</span><strong>MARKET</strong></div>
-        <div class="market-wallet"><span>◆ <b id="marketCoins">0</b></span><span class="diamond">◇ <b id="marketDiamonds">0</b></span></div>
+        <div class="market-wallet"><span><svg class="ic"><use href="#i-coin"/></svg> <b id="marketCoins">0</b></span><span class="diamond"><svg class="ic"><use href="#i-gem"/></svg> <b id="marketDiamonds">0</b></span></div>
       </div>
       <div class="market-hero">
         <div><span>GÜNÜN SEÇİMİ</span><strong>Tarzını kuşan.<br>Avantajını hazırla.</strong></div>
-        <i>◇</i>
+        <i>Ğ</i>
       </div>
       <div id="marketGrid" class="market-grid"></div>
     </section>
 
     <section id="profileScreen" class="screen profile-screen">
       <div class="profile-head">
-        <button id="profileBackButton" class="icon-button solid" type="button" aria-label="Geri">‹</button>
+        <button id="profileBackButton" class="icon-btn" type="button" aria-label="Geri"><svg class="ic"><use href="#i-back"/></svg></button>
         <strong>PROFİL</strong>
       </div>
       <div class="profile-card">
@@ -69,8 +91,8 @@
         <h2 id="profileName">Oyuncu</h2>
         <div class="profile-code">KOD <b id="profileCode">------------</b></div>
         <div class="profile-wallet">
-          <div><span>◆</span><b id="profileCoins">0</b><small>JETON</small></div>
-          <div class="diamond"><span>◇</span><b id="profileDiamonds">0</b><small>ELMAS</small></div>
+          <div><svg class="ic"><use href="#i-coin"/></svg><b id="profileCoins">0</b><small>JETON</small></div>
+          <div class="diamond"><svg class="ic"><use href="#i-gem"/></svg><b id="profileDiamonds">0</b><small>ELMAS</small></div>
         </div>
         <div class="profile-stats">
           <div class="stat-row"><span>GALİBİYET</span><strong id="profileWins">0</strong></div>
@@ -89,22 +111,20 @@
     </section>
 
     <section id="lobbyScreen" class="screen lobby-screen">
-      <div class="room-code-card">
-        <span>ODA</span>
-        <button id="copyCodeButton" type="button" aria-label="Oda kodunu kopyala">
-          <strong id="roomCodeText">-----</strong><small>⧉</small>
-        </button>
+      <div class="code-strip" role="group" aria-label="Oda kodu">
+        <div id="roomCodeText" class="code-tiles"></div>
+        <button id="copyCodeButton" class="copy-btn" type="button" aria-label="Oda kodunu kopyala"><svg class="ic"><use href="#i-copy"/></svg></button>
       </div>
-      <div class="section-heading"><div><span>OYUNCULAR</span><strong id="playerCount">0 / 4</strong></div></div>
+      <div class="section-label" style="margin-top:6px"><span>OYUNCULAR</span><span class="count-pill" id="playerCount">0 / 4</span></div>
       <div id="lobbyPlayers" class="player-list"></div>
-      <button id="inviteFriendButton" class="text-button" type="button">+ Arkadaş davet et</button>
+      <button id="inviteFriendButton" class="link-btn" type="button"><svg class="ic"><use href="#i-plus"/></svg>Arkadaş davet et</button>
       <div class="lobby-actions">
-        <button id="readyButton" class="button button-primary" type="button">HAZIRIM</button>
-        <button id="startButton" class="button button-gold hidden" type="button" disabled>BAŞLAT</button>
+        <button id="readyButton" class="btn btn--ghost" type="button">HAZIRIM</button>
+        <button id="startButton" class="btn btn--flood hidden" type="button" disabled>BAŞLAT</button>
       </div>
       <div id="invitePicker" class="attack-picker hidden" role="dialog" aria-modal="true" aria-label="Arkadaş davet et">
         <div class="attack-sheet">
-          <div class="attack-sheet-head"><strong>ARKADAŞINI DAVET ET</strong><button id="closeInviteButton" class="icon-button solid" type="button" aria-label="Kapat">×</button></div>
+          <div class="attack-sheet-head"><strong>ARKADAŞINI DAVET ET</strong><button id="closeInviteButton" class="icon-btn" type="button" aria-label="Kapat"><svg class="ic"><use href="#i-close"/></svg></button></div>
           <div id="inviteFriendTargets" class="attack-targets"></div>
         </div>
       </div>
@@ -117,21 +137,21 @@
         <div class="hud-card"><span>SIRA</span><strong id="rankText">–</strong></div>
       </div>
       <div class="status-line"><span id="gameStatus">Harfleri seç</span><div class="status-meta"><span id="stockText" class="stock-count">KALAN –</span><b id="comboText"></b></div></div>
-      <div class="combat-bar"><button id="attackButton" class="attack-button" type="button" disabled>A KİLİTLE · 25</button></div>
+      <div class="combat-bar"><button id="attackButton" class="attack-button" type="button" disabled><svg class="ic"><use href="#i-bolt"/></svg><span id="attackButtonLabel">A KİLİTLE · 25</span></button></div>
       <div id="letterGrid" class="letter-grid" aria-label="Harf havuzu"></div>
       <div class="word-composer">
         <div id="currentWord" class="current-word" aria-live="polite"><span>Kelime</span></div>
         <div class="composer-tools">
-          <button id="shuffleButton" class="icon-button solid" type="button" aria-label="Harfleri karıştır" title="Harfleri karıştır">⟳</button>
-          <button id="backspaceButton" class="icon-button solid" type="button" aria-label="Son harfi sil">⌫</button>
-          <button id="clearButton" class="icon-button solid" type="button" aria-label="Temizle">×</button>
+          <button id="shuffleButton" class="icon-btn" type="button" aria-label="Harfleri karıştır" title="Harfleri karıştır"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+          <button id="backspaceButton" class="icon-btn" type="button" aria-label="Son harfi sil"><svg class="ic"><use href="#i-backspace"/></svg></button>
+          <button id="clearButton" class="icon-btn" type="button" aria-label="Temizle"><svg class="ic"><use href="#i-close"/></svg></button>
         </div>
       </div>
-      <button id="submitWordButton" class="button button-primary submit-button" type="button" disabled>GÖNDER</button>
+      <button id="submitWordButton" class="btn btn--flood btn--submit" type="button" disabled>GÖNDER</button>
       <div id="recentWords" class="recent-words"></div>
       <div id="attackPicker" class="attack-picker hidden" role="dialog" aria-modal="true" aria-label="Rakip seç">
         <div class="attack-sheet">
-          <div class="attack-sheet-head"><strong>HEDEF</strong><button id="closeAttackButton" class="icon-button solid" type="button" aria-label="Kapat">×</button></div>
+          <div class="attack-sheet-head"><strong>HEDEF</strong><button id="closeAttackButton" class="icon-btn" type="button" aria-label="Kapat"><svg class="ic"><use href="#i-close"/></svg></button></div>
           <div id="attackTargets" class="attack-targets"></div>
         </div>
       </div>
@@ -142,7 +162,7 @@
     </section>
 
     <section id="resultsScreen" class="screen results-screen">
-      <div class="trophy">★</div>
+      <div class="trophy"><svg class="ic" style="width:38px;height:38px"><use href="#i-crown"/></svg></div>
       <span class="results-eyebrow">TUR SONUÇLARI</span>
       <h2 id="winnerText">Kazanan!</h2>
       <p id="rewardText" class="reward-text"></p>
@@ -157,15 +177,15 @@
         <span>SERİ</span>
         <div id="seriesList" class="series-list"></div>
       </div>
-      <button id="rematchButton" class="button button-gold hidden" type="button">TEKRAR OYNA</button>
+      <button id="rematchButton" class="btn btn--flood hidden" type="button">TEKRAR OYNA</button>
       <p id="rematchStatus" class="rematch-status"></p>
       <button id="homeButton" class="text-button" type="button">Ana menü</button>
     </section>
   </main>
   <nav id="bottomNav" class="bottom-nav hidden" aria-label="Ana navigasyon">
-    <button id="navPlay" type="button"><i>▶</i><span>OYNA</span></button>
-    <button id="navMarket" type="button"><i>◇</i><span>MARKET</span></button>
-    <button id="navProfile" type="button"><i>●</i><span>PROFİL</span></button>
+    <button id="navPlay" type="button"><svg class="ic"><use href="#i-play"/></svg><span>OYNA</span></button>
+    <button id="navMarket" type="button"><svg class="ic"><use href="#i-shop"/></svg><span>MARKET</span></button>
+    <button id="navProfile" type="button"><svg class="ic"><use href="#i-user"/></svg><span>PROFİL</span></button>
   </nav>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="inviteBanner" class="invite-banner hidden" role="status" aria-live="polite">
@@ -180,11 +200,12 @@
       <div class="radar">
         <span class="radar-ring"></span>
         <span class="radar-ring"></span>
-        <span class="radar-core">⚡</span>
+        <span class="radar-sweep"></span>
+        <svg class="radar-core"><use href="#i-target"/></svg>
       </div>
       <strong id="quickMatchTitle">RAKİP ARANIYOR</strong>
       <p id="quickMatchTimer" class="quick-match-timer">0 sn</p>
-      <button id="cancelQuickMatchButton" class="button button-secondary" type="button">İPTAL ET</button>
+      <button id="cancelQuickMatchButton" class="btn btn--ghost" type="button">İPTAL ET</button>
     </div>
   </div>
   <script type="module" src="app.js"></script>

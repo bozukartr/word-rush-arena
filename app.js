@@ -43,7 +43,7 @@ const ui = Object.fromEntries([
   "connectionBadge", "leaveButton", "playerName", "roomCodeInput", "createRoomButton", "joinRoomButton",
   "roomCodeText", "copyCodeButton", "playerCount", "lobbyPlayers", "readyButton", "startButton",
   "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
-  "coinBadge", "coinText", "attackButton", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
+  "coinBadge", "coinText", "attackButton", "attackButtonLabel", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
   "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "guestLoginButton", "logoutButton",
   "quickMatchButton", "profileName", "profileCode", "profileCoins", "profileDiamonds",
   "friendCodeInput", "addFriendButton", "friendList", "friendRequests", "profileBackButton",
@@ -736,7 +736,12 @@ async function enterRoom(code) {
   state.countdownRound = null;
   hideCountdown();
   ui.attackPicker.classList.add("hidden");
-  ui.roomCodeText.textContent = code;
+  ui.roomCodeText.replaceChildren(...[...code].map((digit) => {
+    const tile = document.createElement("span");
+    tile.className = "tile tile--code";
+    tile.textContent = digit;
+    return tile;
+  }));
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
     state.room = snapshot.data();
@@ -915,7 +920,10 @@ function renderPlayers() {
   ui.lobbyPlayers.replaceChildren(...players.map((player, index) => {
     const card = document.createElement("div");
     card.className = "player-card";
-    card.innerHTML = `<div class="avatar">${index + 1}</div><div class="player-meta"><strong></strong><span></span></div><div class="ready-mark"></div>`;
+    card.innerHTML = `<div class="avatar"></div><div class="player-meta"><strong></strong><span></span></div><div class="ready-mark"></div>`;
+    const avatar = card.querySelector(".avatar");
+    avatar.textContent = initials(player.name);
+    avatar.style.setProperty("--h", `${avatarHue(player.uid)}deg`);
     card.querySelector("strong").textContent = player.name;
     card.querySelector("span").textContent = player.uid === state.room?.hostId ? "Oda sahibi" : (player.connected ? "Bağlı" : "Bağlantı koptu");
     const mark = card.querySelector(".ready-mark");
@@ -1011,7 +1019,7 @@ function renderAttackButton() {
   const me = state.players.find((player) => player.uid === state.uid);
   const used = me?.attackUsedRound === (state.room?.round ?? 0);
   const amount = state.inventory.a_lock ?? 0;
-  ui.attackButton.textContent = used ? "KULLANILDI" : `A KİLİTLE · x${amount}`;
+  ui.attackButtonLabel.textContent = used ? "KULLANILDI" : `A KİLİTLE · x${amount}`;
   ui.attackButton.disabled = state.room?.phase !== "playing" || used || amount < 1;
 }
 
@@ -1347,6 +1355,12 @@ function initials(name) {
   return (name?.trim()?.[0] ?? "?").toLocaleUpperCase("tr-TR");
 }
 
+function avatarHue(seed) {
+  let hash = 0;
+  for (const char of String(seed)) hash = (hash * 31 + char.charCodeAt(0)) % 360;
+  return hash;
+}
+
 function renderPodium(sorted) {
   if (!ui.podium) return;
   const top = [sorted[1], sorted[0], sorted[2]].filter(Boolean);
@@ -1354,8 +1368,12 @@ function renderPodium(sorted) {
     const rank = sorted.indexOf(player) + 1;
     const step = document.createElement("div");
     step.className = `podium-step rank-${rank}`;
-    step.innerHTML = `<div class="podium-avatar"></div><strong class="podium-name"></strong><span class="podium-score"></span><div class="podium-bar"><b></b></div>`;
-    step.querySelector(".podium-avatar").textContent = initials(player.name);
+    step.innerHTML = rank === 1
+      ? `<svg class="podium-crown"><use href="#i-crown"/></svg><div class="podium-avatar"></div><strong class="podium-name"></strong><span class="podium-score"></span><div class="podium-bar"><b></b></div>`
+      : `<div class="podium-avatar"></div><strong class="podium-name"></strong><span class="podium-score"></span><div class="podium-bar"><b></b></div>`;
+    const avatar = step.querySelector(".podium-avatar");
+    avatar.textContent = initials(player.name);
+    avatar.style.setProperty("--h", `${avatarHue(player.uid)}deg`);
     step.querySelector(".podium-name").textContent = player.name;
     step.querySelector(".podium-score").textContent = `${player.score ?? 0} puan`;
     step.querySelector(".podium-bar b").textContent = String(rank);
