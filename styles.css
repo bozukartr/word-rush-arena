@@ -110,6 +110,7 @@ button { color: inherit; touch-action: manipulation; }
 
 .screen { display: none; flex: 1; min-height: 0; animation: screen-in .26s ease-out; }
 .screen.active { display: flex; flex-direction: column; }
+.screen.screen-guard { pointer-events: none; }
 @keyframes screen-in { from { opacity: 0; transform: translateY(8px); } }
 .hidden { display: none !important; }
 
@@ -383,6 +384,9 @@ input:focus { border-color: var(--floodlight); box-shadow: 0 0 0 4px color-mix(i
 .quick-match-modal strong { font-size: 13.5px; letter-spacing: .09em; font-weight: 900; margin-top: 2px; }
 .quick-match-timer { min-height: 18px; margin: 4px 0 18px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .quick-match-modal .btn { width: 100%; }
+.quick-match-modal .lobby-actions { width: 100%; grid-template-columns: 1fr 1fr; margin-top: 4px; padding-top: 0; }
+.rejoin-banner { text-align: left; margin-bottom: 16px; }
+.rejoin-banner .lobby-actions { grid-template-columns: 1fr 1fr; margin-top: 8px; padding-top: 0; }
 
 .invite-banner { position: fixed; z-index: 40; left: 50%; top: calc(14px + var(--safe-top)); transform: translate(-50%, -140%); width: min(calc(100% - 32px), 480px); display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; color: var(--floodlight-ink); background: linear-gradient(135deg, color-mix(in srgb, var(--floodlight) 100%, white 10%), var(--floodlight)); border: 1px solid color-mix(in srgb, var(--floodlight) 60%, transparent); border-radius: 16px; box-shadow: var(--shadow); transition: transform .22s ease-out; }
 .invite-banner:not(.hidden) { transform: translate(-50%, 0); }
