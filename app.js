@@ -13,7 +13,7 @@ import {
 import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
 import { isValidWord, loadDictionary, normalizeWord, randomSeedWord } from "./words.js";
 import {
-  acceptedWord, attackFlash, celebrate, comboPop, enterScreen, haptic, initEffects,
+  acceptedWord, attackFlash, celebrate, comboPop, countdownPulse, enterScreen, haptic, initEffects,
   invalidWord, isSoundEnabled, pressTile, purchaseFx, refillTiles, setSound, timerPulse
 } from "./effects.js";
 
@@ -45,16 +45,18 @@ const ui = Object.fromEntries([
   "timerText", "scoreStrip", "rankText", "gameStatus", "stockText", "comboText", "letterGrid", "currentWord",
   "coinBadge", "coinText", "attackButton", "attackPicker", "attackTargets", "closeAttackButton", "rewardText",
   "diamondBadge", "diamondText", "profileButton", "profileAvatar", "googleLoginButton", "guestLoginButton", "logoutButton",
-  "quickMatchButton", "quickMatchStatus", "profileName", "profileCode", "profileCoins", "profileDiamonds",
+  "quickMatchButton", "profileName", "profileCode", "profileCoins", "profileDiamonds",
   "friendCodeInput", "addFriendButton", "friendList", "friendRequests", "profileBackButton",
   "effectsCanvas", "bottomNav", "navPlay", "navMarket", "navProfile", "marketGrid", "marketBackButton",
   "marketCoins", "marketDiamonds", "soundToggle",
-  "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "resultsList",
+  "shuffleButton", "backspaceButton", "clearButton", "submitWordButton", "recentWords", "winnerText", "podium", "resultsList",
   "rematchButton", "rematchStatus", "homeButton", "toast",
   "roundRecap", "recapLongest", "recapTopScore", "recapTotal", "seriesRecap", "seriesList",
   "inviteFriendButton", "invitePicker", "inviteFriendTargets", "closeInviteButton",
   "inviteBanner", "inviteText", "inviteJoinButton", "inviteDismissButton",
-  "profileWins", "profileLongestWord", "profileBestWord"
+  "profileWins", "profileLongestWord", "profileBestWord",
+  "quickMatchOverlay", "quickMatchTitle", "quickMatchTimer", "cancelQuickMatchButton",
+  "countdownOverlay", "countdownNumber", "countdownSubtext"
 ].map((id) => [id, $(id)]));
 
 const dictionaryReady = loadDictionary();
@@ -74,6 +76,8 @@ const LETTER_STOCK = Object.freeze({
 const VOWELS = new Set(["A", "E", "I", "İ", "O", "Ö", "U", "Ü"]);
 const ATTACK_DURATION_MS = 8000;
 const ROUND_GRACE_MS = 2000;
+const COUNTDOWN_MS = 3000;
+const ROUND_DURATION_MS = 75000;
 const MARKET_ITEMS = Object.freeze([
   { id: "a_lock", title: "A Kilidi", description: "Rakibin A taşlarını 8 sn kilitler", icon: "A×", currency: "coins", price: 25, kind: "consumable" },
   { id: "aurora", title: "Aurora", description: "Canlı mor ve turkuaz taş teması", icon: "◇", currency: "diamonds", price: 3, kind: "theme" },
@@ -161,6 +165,10 @@ const state = {
   roundRecap: null,
   roundRecapRound: null,
   roundHistoryRecorded: null,
+  quickMatchTimerInterval: null,
+  countdownRound: null,
+  countdownTimer: null,
+  lastCountdownSecond: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -479,10 +487,30 @@ async function equipTheme(item, card) {
   purchaseFx(card.isConnected ? card : ui.marketGrid, "diamonds");
 }
 
-function setQuickMatchUi(active, text = "") {
+function openQuickMatchOverlay() {
+  ui.quickMatchOverlay.classList.remove("hidden");
+  ui.quickMatchTitle.textContent = "RAKİP ARANIYOR";
+  clearInterval(state.quickMatchTimerInterval);
+  const startedAt = Date.now();
+  const tick = () => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    ui.quickMatchTimer.textContent = `${elapsed} sn`;
+  };
+  tick();
+  state.quickMatchTimerInterval = setInterval(tick, 1000);
+}
+
+function closeQuickMatchOverlay() {
+  clearInterval(state.quickMatchTimerInterval);
+  state.quickMatchTimerInterval = null;
+  ui.quickMatchOverlay.classList.add("hidden");
+}
+
+function setQuickMatchUi(active, statusText = "") {
   state.quickMatching = active;
-  ui.quickMatchButton.textContent = active ? "ARAMAYI İPTAL ET" : "QUICK MATCH";
-  ui.quickMatchStatus.textContent = text;
+  if (active) openQuickMatchOverlay();
+  else closeQuickMatchOverlay();
+  if (statusText) ui.quickMatchTitle.textContent = statusText;
 }
 
 async function joinQuickRoom(code) {
@@ -512,16 +540,18 @@ function watchMatchmaking() {
   });
 }
 
+async function cancelQuickMatch() {
+  if (!state.quickMatching) return;
+  await deleteDoc(doc(db, "matchmaking", state.uid)).catch(() => {});
+  state.matchmakingUnsubscriber?.();
+  state.matchmakingUnsubscriber = null;
+  setQuickMatchUi(false, "");
+}
+
 async function quickMatch() {
-  if (state.quickMatching) {
-    await deleteDoc(doc(db, "matchmaking", state.uid)).catch(() => {});
-    state.matchmakingUnsubscriber?.();
-    state.matchmakingUnsubscriber = null;
-    setQuickMatchUi(false, "");
-    return;
-  }
+  if (state.quickMatching) return;
   try {
-    setQuickMatchUi(true, "Rakip aranıyor…");
+    setQuickMatchUi(true);
     const ownQueueRef = doc(db, "matchmaking", state.uid);
     await setDoc(ownQueueRef, {
       uid: state.uid,
@@ -561,7 +591,7 @@ async function quickMatch() {
     await joinQuickRoom(code);
   } catch (error) {
     if (state.quickMatching && /başka bir maça|kodu çakıştı/.test(error.message)) {
-      ui.quickMatchStatus.textContent = "Rakip aranıyor…";
+      ui.quickMatchTitle.textContent = "RAKİP ARANIYOR";
     } else {
       setQuickMatchUi(false, "");
       toast(error.message, true);
@@ -703,6 +733,8 @@ async function enterRoom(code) {
   state.roundRecap = null;
   state.roundRecapRound = null;
   state.roundHistoryRecorded = null;
+  state.countdownRound = null;
+  hideCountdown();
   ui.attackPicker.classList.add("hidden");
   ui.roomCodeText.textContent = code;
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
@@ -759,20 +791,65 @@ function routeRoomPhase() {
     showScreen("lobbyScreen");
     syncMyRound();
     renderPlayers();
+    state.countdownRound = null;
+    hideCountdown();
   } else if (state.room.phase === "playing") {
     showScreen("gameScreen");
     ensurePlayerBoard();
     renderLetters();
     renderAttackButton();
     startTimer();
+    startCountdownIfNeeded();
   } else if (state.room.phase === "results") {
     clearInterval(state.timer);
+    hideCountdown();
     showScreen("resultsScreen");
     renderResults();
     awardRound();
     loadRoundRecap();
     recordRoundHistory();
   }
+}
+
+function isCountdownActive() {
+  const startsAt = state.room?.startsAt?.toMillis?.() ?? 0;
+  return startsAt > Date.now();
+}
+
+function startCountdownIfNeeded() {
+  const round = state.room?.round ?? 0;
+  if (!isCountdownActive()) { hideCountdown(); return; }
+  if (state.countdownRound === round) return;
+  state.countdownRound = round;
+  showCountdown();
+}
+
+function showCountdown() {
+  ui.countdownOverlay.classList.remove("hidden");
+  ui.letterGrid.classList.add("countdown-hide");
+  clearInterval(state.countdownTimer);
+  state.lastCountdownSecond = null;
+  const tick = () => {
+    const startsAt = state.room?.startsAt?.toMillis?.() ?? 0;
+    const msLeft = startsAt - Date.now();
+    if (msLeft <= 0) { hideCountdown(); return; }
+    const secondsLeft = Math.ceil(msLeft / 1000);
+    if (secondsLeft !== state.lastCountdownSecond) {
+      state.lastCountdownSecond = secondsLeft;
+      ui.countdownNumber.textContent = secondsLeft;
+      countdownPulse(ui.countdownNumber);
+      haptic("tap");
+    }
+  };
+  tick();
+  state.countdownTimer = setInterval(tick, 100);
+}
+
+function hideCountdown() {
+  clearInterval(state.countdownTimer);
+  state.countdownTimer = null;
+  ui.countdownOverlay.classList.add("hidden");
+  ui.letterGrid.classList.remove("countdown-hide");
 }
 
 async function loadRoundRecap() {
@@ -1015,7 +1092,7 @@ function renderLetters() {
 }
 
 function selectLetter(index) {
-  if (state.shuffling || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index) || state.room?.phase !== "playing") return;
+  if (state.shuffling || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index) || state.room?.phase !== "playing" || isCountdownActive()) return;
   state.selected.push(index);
   haptic("tap");
   renderLetters();
@@ -1040,7 +1117,7 @@ function backspace() { state.selected.pop(); renderLetters(); }
 function clearWord() { state.selected = []; renderLetters(); }
 
 async function shuffleLetters() {
-  if (state.shuffling || state.submitting || state.room?.phase !== "playing") return;
+  if (state.shuffling || state.submitting || state.room?.phase !== "playing" || isCountdownActive()) return;
   const previousLetters = [...activeLetters()];
   if (previousLetters.length < 2) return;
   let nextLetters = shuffle(previousLetters);
@@ -1208,11 +1285,15 @@ function startTimer() {
   clearInterval(state.timer);
   const tick = async () => {
     const end = state.room?.endsAt?.toMillis?.() ?? 0;
-    const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-    ui.timerText.textContent = remaining;
-    if (remaining !== state.lastTimerSecond) {
-      state.lastTimerSecond = remaining;
-      timerPulse(ui.timerText, remaining);
+    if (isCountdownActive()) {
+      ui.timerText.textContent = "–";
+    } else {
+      const remaining = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      ui.timerText.textContent = remaining;
+      if (remaining !== state.lastTimerSecond) {
+        state.lastTimerSecond = remaining;
+        timerPulse(ui.timerText, remaining);
+      }
     }
     refreshBlockedLetters();
     if (
@@ -1253,21 +1334,46 @@ async function startMatch() {
   if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
   state.finishing = false;
   state.lastTimerSecond = null;
+  const startsAt = Date.now() + COUNTDOWN_MS;
   await updateDoc(roomRef(), {
     phase: "playing", letters: createLetters(), boardVersion: increment(1), winnerId: null,
-    endsAt: Timestamp.fromMillis(Date.now() + 75000), updatedAt: serverTimestamp()
+    startsAt: Timestamp.fromMillis(startsAt),
+    endsAt: Timestamp.fromMillis(startsAt + ROUND_DURATION_MS), updatedAt: serverTimestamp()
   });
   track("match_start", { players: state.players.length });
+}
+
+function initials(name) {
+  return (name?.trim()?.[0] ?? "?").toLocaleUpperCase("tr-TR");
+}
+
+function renderPodium(sorted) {
+  if (!ui.podium) return;
+  const top = [sorted[1], sorted[0], sorted[2]].filter(Boolean);
+  ui.podium.replaceChildren(...top.map((player) => {
+    const rank = sorted.indexOf(player) + 1;
+    const step = document.createElement("div");
+    step.className = `podium-step rank-${rank}`;
+    step.innerHTML = `<div class="podium-avatar"></div><strong class="podium-name"></strong><span class="podium-score"></span><div class="podium-bar"><b></b></div>`;
+    step.querySelector(".podium-avatar").textContent = initials(player.name);
+    step.querySelector(".podium-name").textContent = player.name;
+    step.querySelector(".podium-score").textContent = `${player.score ?? 0} puan`;
+    step.querySelector(".podium-bar b").textContent = String(rank);
+    return step;
+  }));
 }
 
 function renderResults() {
   if (!state.players.length) return;
   const sorted = state.players.map(currentRoundPlayer).sort((a, b) => b.score - a.score);
   ui.winnerText.textContent = `${sorted[0].name} kazandı!`;
-  ui.resultsList.replaceChildren(...sorted.map((player, index) => {
+  renderPodium(sorted);
+  const rest = sorted.slice(3);
+  ui.resultsList.classList.toggle("hidden", rest.length === 0);
+  ui.resultsList.replaceChildren(...rest.map((player, index) => {
     const row = document.createElement("div");
     row.className = "result-row";
-    row.innerHTML = `<span class="result-rank">#${index + 1}</span><strong></strong><b></b>`;
+    row.innerHTML = `<span class="result-rank">#${index + 4}</span><strong></strong><b></b>`;
     row.querySelector("strong").textContent = player.name;
     row.querySelector("b").textContent = `${player.score ?? 0} puan`;
     return row;
@@ -1361,7 +1467,7 @@ async function awardRound() {
 async function rematch() {
   if (state.room?.hostId !== state.uid) return;
   await updateDoc(roomRef(), {
-    phase: "lobby", round: increment(1), letters: [], endsAt: null, winnerId: null, updatedAt: serverTimestamp()
+    phase: "lobby", round: increment(1), letters: [], startsAt: null, endsAt: null, winnerId: null, updatedAt: serverTimestamp()
   });
   state.combo = 0;
   state.recentWords = [];
@@ -1389,8 +1495,10 @@ async function leaveRoom() {
     roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false,
     boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false,
     effects: [], blockedActive: false, rewarding: false, finishing: false,
-    roundHistory: [], roundRecap: null, roundRecapRound: null, roundHistoryRecorded: null
+    roundHistory: [], roundRecap: null, roundRecapRound: null, roundHistoryRecorded: null,
+    countdownRound: null
   });
+  hideCountdown();
   ui.attackPicker.classList.add("hidden");
   showScreen("homeScreen");
 }
@@ -1432,6 +1540,7 @@ async function logout() {
   state.inviteUnsubscriber?.();
   state.matchmakingUnsubscriber?.();
   hideInviteBanner();
+  setQuickMatchUi(false);
   await signOut(auth);
 }
 
@@ -1441,6 +1550,7 @@ ui.googleLoginButton.addEventListener("click", googleLogin);
 ui.guestLoginButton.addEventListener("click", guestLogin);
 ui.logoutButton.addEventListener("click", logout);
 ui.quickMatchButton.addEventListener("click", quickMatch);
+ui.cancelQuickMatchButton.addEventListener("click", cancelQuickMatch);
 ui.profileButton.addEventListener("click", () => showScreen("profileScreen"));
 ui.profileBackButton.addEventListener("click", () => showScreen("homeScreen"));
 ui.marketBackButton.addEventListener("click", () => showScreen("homeScreen"));
