@@ -56,7 +56,9 @@ const ui = Object.fromEntries([
   "inviteBanner", "inviteText", "inviteJoinButton", "inviteDismissButton",
   "profileWins", "profileLongestWord", "profileBestWord",
   "quickMatchOverlay", "quickMatchTitle", "quickMatchTimer", "cancelQuickMatchButton",
-  "countdownOverlay", "countdownNumber", "countdownSubtext"
+  "countdownOverlay", "countdownNumber", "countdownSubtext",
+  "confirmOverlay", "confirmTitle", "confirmMessage", "confirmCancelButton", "confirmOkButton",
+  "rejoinBanner", "rejoinCode", "rejoinButton", "rejoinDismissButton"
 ].map((id) => [id, $(id)]));
 
 const dictionaryReady = loadDictionary();
@@ -169,6 +171,7 @@ const state = {
   countdownRound: null,
   countdownTimer: null,
   lastCountdownSecond: null,
+  screenGuardTimer: null,
   unsubscribers: [],
   timer: null,
   heartbeat: null,
@@ -183,7 +186,11 @@ function showScreen(id) {
   ui.navPlay.classList.toggle("active", id === "homeScreen");
   ui.navMarket.classList.toggle("active", id === "marketScreen");
   ui.navProfile.classList.toggle("active", id === "profileScreen");
-  enterScreen($(id));
+  const target = $(id);
+  target.classList.add("screen-guard");
+  clearTimeout(state.screenGuardTimer);
+  state.screenGuardTimer = setTimeout(() => target.classList.remove("screen-guard"), 380);
+  enterScreen(target);
   if (id === "marketScreen") renderMarket();
 }
 
@@ -197,6 +204,24 @@ function toast(message, error = false) {
   ui.toast.textContent = message;
   ui.toast.className = `toast show${error ? " error" : ""}`;
   state.toastTimer = setTimeout(() => { ui.toast.className = "toast"; }, 2600);
+}
+
+function showConfirm(message, okLabel = "Çık") {
+  return new Promise((resolve) => {
+    ui.confirmMessage.textContent = message;
+    ui.confirmOkButton.textContent = okLabel;
+    ui.confirmOverlay.classList.remove("hidden");
+    const onOk = () => settle(true);
+    const onCancel = () => settle(false);
+    function settle(result) {
+      ui.confirmOverlay.classList.add("hidden");
+      ui.confirmOkButton.removeEventListener("click", onOk);
+      ui.confirmCancelButton.removeEventListener("click", onCancel);
+      resolve(result);
+    }
+    ui.confirmOkButton.addEventListener("click", onOk);
+    ui.confirmCancelButton.addEventListener("click", onCancel);
+  });
 }
 
 function track(name, params = {}) {
@@ -934,7 +959,7 @@ function renderPlayers() {
   ui.readyButton.textContent = state.ready ? "HAZIR DEĞİLİM" : "HAZIRIM";
   const isHost = state.room?.hostId === state.uid;
   ui.startButton.classList.toggle("hidden", !isHost);
-  ui.startButton.disabled = players.length < 2 || players.some((player) => !player.ready);
+  ui.startButton.disabled = players.length < 2 || players.some((player) => !player.ready || player.connected === false);
   ui.rematchButton.classList.toggle("hidden", !isHost);
 }
 
@@ -1330,7 +1355,7 @@ async function maybeStartQuickMatch() {
   if (
     state.quickStarting || !state.room?.quickMatch || state.room.phase !== "lobby" ||
     state.room.hostId !== state.uid || state.players.length !== 2 ||
-    state.players.some((player) => !player.ready)
+    state.players.some((player) => !player.ready || player.connected === false)
   ) return;
   state.quickStarting = true;
   try { await startMatch(); }
@@ -1339,7 +1364,7 @@ async function maybeStartQuickMatch() {
 
 async function startMatch() {
   const players = state.players.map(currentRoundPlayer);
-  if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready)) return;
+  if (state.room?.hostId !== state.uid || players.length < 2 || players.some((player) => !player.ready || player.connected === false)) return;
   state.finishing = false;
   state.lastTimerSecond = null;
   const startsAt = Date.now() + COUNTDOWN_MS;
@@ -1505,7 +1530,16 @@ function leaveListeners() {
   clearInterval(state.heartbeat);
 }
 
+async function requestLeaveRoom() {
+  if (state.room?.phase === "playing") {
+    const confirmed = await showConfirm("Oyundan çıkarsan bu turu kaybedersin. Emin misin?");
+    if (!confirmed) return;
+  }
+  await leaveRoom();
+}
+
 async function leaveRoom() {
+  const leftCode = state.roomCode;
   if (state.roomCode && state.uid) await updateDoc(playerRef(), { connected: false, lastSeenAt: serverTimestamp() }).catch(() => {});
   leaveListeners();
   persistRoomCode(null);
@@ -1518,7 +1552,44 @@ async function leaveRoom() {
   });
   hideCountdown();
   ui.attackPicker.classList.add("hidden");
+  if (leftCode) localStorage.setItem("wra-last-left-room", leftCode);
   showScreen("homeScreen");
+  checkRejoinBanner();
+}
+
+async function checkRejoinBanner() {
+  const code = localStorage.getItem("wra-last-left-room");
+  if (!code || !state.uid) { hideRejoinBanner(); return; }
+  try {
+    const [roomSnapshot, playerSnapshot] = await Promise.all([getDoc(roomRef(code)), getDoc(playerRef(state.uid, code))]);
+    if (!roomSnapshot.exists() || !playerSnapshot.exists()) {
+      localStorage.removeItem("wra-last-left-room");
+      hideRejoinBanner();
+      return;
+    }
+    ui.rejoinCode.textContent = code;
+    ui.rejoinBanner.classList.remove("hidden");
+  } catch (error) {
+    hideRejoinBanner();
+  }
+}
+
+function hideRejoinBanner() {
+  ui.rejoinBanner.classList.add("hidden");
+}
+
+function dismissRejoinBanner() {
+  localStorage.removeItem("wra-last-left-room");
+  hideRejoinBanner();
+}
+
+async function rejoinLastRoom() {
+  const code = localStorage.getItem("wra-last-left-room");
+  if (!code) return;
+  hideRejoinBanner();
+  const resumed = await resumeRoom(code);
+  localStorage.removeItem("wra-last-left-room");
+  if (!resumed) toast("Oda artık mevcut değil.", true);
 }
 
 function setBusy(value) {
@@ -1598,7 +1669,9 @@ ui.clearButton.addEventListener("click", clearWord);
 ui.submitWordButton.addEventListener("click", submitWord);
 ui.rematchButton.addEventListener("click", rematch);
 ui.homeButton.addEventListener("click", leaveRoom);
-ui.leaveButton.addEventListener("click", leaveRoom);
+ui.leaveButton.addEventListener("click", requestLeaveRoom);
+ui.rejoinButton.addEventListener("click", rejoinLastRoom);
+ui.rejoinDismissButton.addEventListener("click", dismissRejoinBanner);
 window.addEventListener("online", () => setConnection("online", "Çevrimiçi"));
 window.addEventListener("offline", () => setConnection("offline", "Çevrimdışı"));
 window.addEventListener("beforeunload", () => { if (state.roomCode) updateDoc(playerRef(), { connected: false }).catch(() => {}); });
@@ -1635,7 +1708,7 @@ onAuthStateChanged(auth, async (user) => {
   setConnection("online", guest ? "Misafir" : "Çevrimiçi");
   const savedRoomCode = localStorage.getItem("wra-room-code");
   const resumed = savedRoomCode ? await resumeRoom(savedRoomCode) : false;
-  if (!resumed) showScreen("homeScreen");
+  if (!resumed) { showScreen("homeScreen"); checkRejoinBanner(); }
   track("app_ready");
 });
 
