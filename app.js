@@ -213,8 +213,9 @@ function toast(message, error = false) {
   state.toastTimer = setTimeout(() => { ui.toast.className = "toast"; }, 2600);
 }
 
-function showConfirm(message, okLabel = "Çık") {
+function showConfirm(message, okLabel = "Çık", title = "OYUNDAN ÇIK") {
   return new Promise((resolve) => {
+    ui.confirmTitle.textContent = title;
     ui.confirmMessage.textContent = message;
     ui.confirmOkButton.textContent = okLabel;
     ui.confirmOverlay.classList.remove("hidden");
@@ -1680,7 +1681,7 @@ function setAuthBusy(value) {
 function googleRecoveryOptions() {
   return {
     credentialFromError: (error) => GoogleAuthProvider.credentialFromError(error),
-    confirmSwitch: () => showConfirm("Bu Google hesabı zaten kayıtlı. Mevcut hesabına geçilsin mi? Misafir puanların bu hesapla birleştirilmez.", "HESABA GEÇ"),
+    confirmSwitch: () => showConfirm("Bu Google hesabı zaten kayıtlı. Mevcut hesabına geçilsin mi? Misafir puanların bu hesapla birleştirilmez.", "HESABA GEÇ", "GOOGLE HESABINA GEÇ"),
     signInExisting: (credential) => signInWithCredential(auth, credential),
     canRedirect: location.hostname === firebaseConfig.authDomain,
     redirect: () => auth.currentUser?.isAnonymous
