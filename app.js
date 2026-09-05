@@ -3,13 +3,14 @@ import { getAnalytics, isSupported as analyticsSupported, logEvent } from "https
 import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js";
 import {
   GoogleAuthProvider, connectAuthEmulator, getAuth, getRedirectResult, linkWithPopup,
-  linkWithRedirect, onAuthStateChanged, signInAnonymously, signInWithPopup, signInWithRedirect, signOut
+  linkWithRedirect, onAuthStateChanged, signInAnonymously, signInWithCredential, signInWithPopup, signInWithRedirect, signOut
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
 import {
   Timestamp, collection, connectFirestoreEmulator, deleteDoc, doc, getDoc, getDocs,
   getFirestore, increment, limit, onSnapshot, orderBy, query, runTransaction,
   serverTimestamp, setDoc, updateDoc, where
 } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-firestore.js";
+import { authErrorMessage, recoverGoogleLogin } from "./auth-flow.js";
 import { appCheckSiteKey, firebaseConfig } from "./firebase-config.js";
 import { isValidWord, loadDictionary, normalizeWord, randomSeedWord } from "./words.js";
 import {
@@ -28,8 +29,10 @@ if (appCheckSiteKey) {
 const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+let authBusy = false;
 let analytics = null;
-analyticsSupported().then((supported) => { if (supported) analytics = getAnalytics(app); });
+analyticsSupported().then((supported) => { if (supported) analytics = getAnalytics(app); }).catch(() => {});
 
 const emulatorMode = location.hostname === "localhost" && new URLSearchParams(location.search).has("emulator");
 if (emulatorMode) {
@@ -62,6 +65,8 @@ const ui = Object.fromEntries([
 ].map((id) => [id, $(id)]));
 
 const dictionaryReady = loadDictionary();
+// Attach a handler immediately, even before the player signs in.
+dictionaryReady.catch(() => {});
 
 const LETTER_POINTS = Object.freeze({
   A: 1, B: 3, C: 4, Ç: 4, D: 3, E: 1, F: 7, G: 5, Ğ: 8,
@@ -136,6 +141,7 @@ const state = {
   recentWords: [],
   combo: 0,
   submitting: false,
+  boardOperation: null,
   shuffling: false,
   ready: false,
   boardVersion: null,
@@ -179,6 +185,7 @@ const state = {
 };
 
 function showScreen(id) {
+  document.body.classList.toggle("in-game", id === "gameScreen");
   for (const screen of screens) $(screen).classList.toggle("active", screen === id);
   ui.leaveButton.classList.toggle("hidden", !state.roomCode);
   const socialScreen = ["homeScreen", "marketScreen", "profileScreen"].includes(id);
@@ -206,8 +213,9 @@ function toast(message, error = false) {
   state.toastTimer = setTimeout(() => { ui.toast.className = "toast"; }, 2600);
 }
 
-function showConfirm(message, okLabel = "Çık") {
+function showConfirm(message, okLabel = "Çık", title = "OYUNDAN ÇIK") {
   return new Promise((resolve) => {
+    ui.confirmTitle.textContent = title;
     ui.confirmMessage.textContent = message;
     ui.confirmOkButton.textContent = okLabel;
     ui.confirmOverlay.classList.remove("hidden");
@@ -745,6 +753,9 @@ async function enterRoom(code) {
   leaveListeners();
   persistRoomCode(code);
   state.roomCode = code;
+  state.boardOperation = null;
+  state.submitting = false;
+  state.shuffling = false;
   state.selected = [];
   state.recentWords = [];
   state.boardVersion = null;
@@ -769,18 +780,27 @@ async function enterRoom(code) {
   }));
   state.unsubscribers.push(onSnapshot(roomRef(), (snapshot) => {
     if (!snapshot.exists()) { toast("Oda kapatıldı.", true); leaveRoom(); return; }
-    state.room = snapshot.data();
+    const nextRoom = snapshot.data();
+    if (state.room && (nextRoom.round !== state.room.round || nextRoom.phase !== state.room.phase)) {
+      state.boardOperation = null;
+      state.submitting = false;
+      state.shuffling = false;
+      state.selected = [];
+    }
+    state.room = nextRoom;
     routeRoomPhase();
   }, () => toast("Oda verisi okunamadı.", true)));
   state.unsubscribers.push(onSnapshot(query(collection(roomRef(), "players"), orderBy("score", "desc")), (snapshot) => {
     state.players = snapshot.docs.map((item) => ({ uid: item.id, ...item.data() }));
     const me = state.players.find((player) => player.uid === state.uid);
     state.ready = Boolean(me?.ready) && me?.round === (state.room?.round ?? 0);
-    const nextBoardVersion = me?.boardVersion ?? 0;
-    if (state.boardVersion !== null && nextBoardVersion !== state.boardVersion) state.selected = [];
-    state.boardVersion = nextBoardVersion;
-    state.playerLetters = me?.boardRound === (state.room?.round ?? 0) ? (me?.letters ?? []) : [];
-    state.playerBag = me?.boardRound === (state.room?.round ?? 0) && Array.isArray(me?.letterBag) ? me.letterBag : null;
+    if (!state.submitting && !state.shuffling) {
+      const nextBoardVersion = me?.boardVersion ?? 0;
+      if (state.boardVersion !== null && nextBoardVersion !== state.boardVersion) state.selected = [];
+      state.boardVersion = nextBoardVersion;
+      state.playerLetters = me?.boardRound === (state.room?.round ?? 0) ? (me?.letters ?? []) : [];
+      state.playerBag = me?.boardRound === (state.room?.round ?? 0) && Array.isArray(me?.letterBag) ? me.letterBag : null;
+    }
     renderPlayers();
     renderScores();
     renderStock();
@@ -1102,30 +1122,47 @@ async function useAttack(targetId) {
   }
 }
 
+function canPlay() {
+  return state.room?.phase === "playing" && !isCountdownActive()
+    && (state.room.endsAt?.toMillis?.() ?? 0) > Date.now();
+}
+
 function renderLetters() {
   const letters = activeLetters();
-  ui.letterGrid.replaceChildren(...letters.map((letter, index) => {
-    const button = document.createElement("button");
-    button.type = "button";
+  // Preserve DOM identity, focus and pointer targets between taps.
+  while (ui.letterGrid.children.length > letters.length) ui.letterGrid.lastElementChild.remove();
+  letters.forEach((letter, index) => {
+    let button = ui.letterGrid.children[index];
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      const glyph = document.createElement("span");
+      glyph.className = "tile-letter";
+      const point = document.createElement("small");
+      point.className = "tile-point";
+      button.append(glyph, point);
+      button.addEventListener("pointerdown", (event) => {
+        if (!event.isPrimary || event.button !== 0) return;
+        event.preventDefault();
+        selectLetter(index);
+      });
+      // Keyboard and assistive-technology activation has no pointerdown.
+      button.addEventListener("click", (event) => { if (event.detail === 0) selectLetter(index); });
+      ui.letterGrid.append(button);
+    }
     const blocked = isLetterBlocked(letter);
     button.className = `letter-tile${state.selected.includes(index) ? " selected" : ""}${blocked ? " blocked" : ""}`;
-    const glyph = document.createElement("span");
-    glyph.className = "tile-letter";
-    glyph.textContent = letter;
-    const point = document.createElement("small");
-    point.className = "tile-point";
-    point.textContent = letter ? letterPoint(letter) : "";
-    button.append(glyph, point);
+    button.children[0].textContent = letter;
+    button.children[1].textContent = letter ? letterPoint(letter) : "";
     button.disabled = !letter || blocked;
+    button.setAttribute("aria-pressed", String(state.selected.includes(index)));
     button.ariaLabel = blocked ? `${letter} harfi geçici olarak kilitli` : (letter ? `${letter} harfi, ${letterPoint(letter)} puan` : "Boş harf yuvası");
-    button.addEventListener("pointerdown", (event) => { event.preventDefault(); selectLetter(index); });
-    return button;
-  }));
+  });
   renderCurrentWord();
 }
 
 function selectLetter(index) {
-  if (state.shuffling || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index) || state.room?.phase !== "playing" || isCountdownActive()) return;
+  if (state.submitting || state.shuffling || !canPlay() || !activeLetters()[index] || isLetterBlocked(activeLetters()[index]) || state.selected.includes(index)) return;
   state.selected.push(index);
   haptic("tap");
   renderLetters();
@@ -1139,28 +1176,47 @@ function currentWord() {
 
 function renderCurrentWord() {
   const word = currentWord();
-  ui.currentWord.textContent = "";
-  if (word) ui.currentWord.textContent = word;
-  else ui.currentWord.innerHTML = "<span>Harfleri seç</span>";
-  ui.submitWordButton.disabled = !word || state.submitting || state.shuffling;
-  ui.shuffleButton.disabled = state.submitting || state.shuffling;
+  if (ui.currentWord.dataset.word !== word) {
+    ui.currentWord.dataset.word = word;
+    ui.currentWord.textContent = "";
+    if (word) ui.currentWord.textContent = word;
+    else ui.currentWord.innerHTML = "<span>Harfleri seç</span>";
+    ui.currentWord.scrollLeft = ui.currentWord.scrollWidth;
+  }
+  const busy = state.submitting || state.shuffling;
+  const unavailable = busy || !canPlay();
+  ui.letterGrid.setAttribute("aria-busy", String(busy));
+  ui.submitWordButton.disabled = [...word].length < 2 || unavailable;
+  ui.submitWordButton.textContent = state.submitting ? "GÖNDERİLİYOR…" : (word.length >= 2 ? `GÖNDER · ${pointsFor(word)} PUAN` : "GÖNDER");
+  ui.shuffleButton.disabled = unavailable;
+  ui.backspaceButton.disabled = !word || unavailable;
+  ui.clearButton.disabled = !word || unavailable;
 }
 
-function backspace() { state.selected.pop(); renderLetters(); }
-function clearWord() { state.selected = []; renderLetters(); }
+function backspace() {
+  if (state.submitting || state.shuffling || !canPlay()) return;
+  state.selected.pop(); renderLetters();
+}
+function clearWord() {
+  if (state.submitting || state.shuffling || !canPlay()) return;
+  state.selected = []; renderLetters();
+}
 
 async function shuffleLetters() {
-  if (state.shuffling || state.submitting || state.room?.phase !== "playing" || isCountdownActive()) return;
+  if (state.shuffling || state.submitting || !canPlay()) return;
   const previousLetters = [...activeLetters()];
+  const previousVersion = state.boardVersion;
   if (previousLetters.length < 2) return;
   let nextLetters = shuffle(previousLetters);
   if (nextLetters.every((letter, index) => letter === previousLetters[index])) {
     nextLetters = [...previousLetters.slice(1), previousLetters[0]];
   }
+  const operation = Symbol("shuffle");
+  state.boardOperation = operation;
   state.shuffling = true;
   state.selected = [];
   state.playerLetters = nextLetters;
-  ui.shuffleButton.disabled = true;
+  state.boardVersion = (previousVersion ?? 0) + 1;
   renderLetters();
   haptic("tap");
   requestAnimationFrame(() => {
@@ -1173,14 +1229,17 @@ async function shuffleLetters() {
       boardVersion: increment(1),
       lastSeenAt: serverTimestamp()
     });
-    state.boardVersion = (state.boardVersion ?? 0) + 1;
   } catch (error) {
+    if (state.boardOperation !== operation) return;
     state.playerLetters = previousLetters;
-    renderLetters();
+    state.boardVersion = previousVersion;
     toast("Harfler karıştırılamadı.", true);
   } finally {
-    state.shuffling = false;
-    ui.shuffleButton.disabled = false;
+    if (state.boardOperation === operation) {
+      state.shuffling = false;
+      state.boardOperation = null;
+      renderLetters();
+    }
   }
 }
 
@@ -1201,14 +1260,15 @@ function pointsFor(word) {
 }
 
 async function submitWord() {
-  if (state.submitting || state.shuffling) return;
+  if (state.submitting || state.shuffling || !canPlay()) return;
   const displayed = currentWord();
   const selectedIndexes = [...state.selected];
   const word = normalizeWord(displayed);
   if ([...word].length < 2) { invalidWord(ui.currentWord); toast("Kelime çok kısa.", true); return; }
-  if (!isValidWord(word)) { state.combo = 0; invalidWord(ui.currentWord); toast("Bu kelime sözlükte yok.", true); return; }
+  if (!isValidWord(word)) { state.combo = 0; ui.comboText.textContent = ""; renderCurrentWord(); invalidWord(ui.currentWord); toast("Bu kelime sözlükte yok.", true); return; }
   if (!Array.isArray(state.playerBag)) { toast("Harf stoğu hazırlanıyor.", true); return; }
-  const submittedAtMs = Date.now();
+  const submittedRound = state.room.round ?? 0;
+  const previousVersion = state.boardVersion;
   const points = pointsFor(word);
   const previousLetters = [...activeLetters()];
   const previousBag = [...state.playerBag];
@@ -1219,6 +1279,12 @@ async function submitWord() {
     optimisticLetters[index] = optimisticBag.pop();
   }
   ensureMinimumVowels(optimisticLetters, optimisticBag, 3, selectedIndexes);
+  const operation = Symbol("submit");
+  const submissionRoomRef = roomRef();
+  const submissionPlayerRef = playerRef();
+  const submissionProfileRef = profileRef();
+  const submissionUid = state.uid;
+  state.boardOperation = operation;
   state.submitting = true;
   state.playerLetters = optimisticLetters;
   state.playerBag = optimisticBag;
@@ -1234,11 +1300,12 @@ async function submitWord() {
     let refreshedLetters = null;
     let refreshedBag = null;
     await runTransaction(db, async (transaction) => {
-      const currentRoom = await transaction.get(roomRef());
+      const currentRoom = await transaction.get(submissionRoomRef);
       if (!currentRoom.exists() || currentRoom.data().phase !== "playing") throw new Error("Tur sona erdi.");
-      if (currentRoom.data().endsAt.toMillis() <= submittedAtMs) throw new Error("Süre doldu.");
+      if (currentRoom.data().endsAt.toMillis() <= Date.now()) throw new Error("Süre doldu.");
       const roomData = currentRoom.data();
-      const currentPlayer = await transaction.get(playerRef());
+      if ((roomData.round ?? 0) !== submittedRound) throw new Error("Yeni tur başladı.");
+      const currentPlayer = await transaction.get(submissionPlayerRef);
       if (!currentPlayer.exists()) throw new Error("Oyuncu bulunamadı.");
       const playerData = currentPlayer.data();
       const liveLetters = playerData.boardRound === (roomData.round ?? 0)
@@ -1250,9 +1317,9 @@ async function submitWord() {
       const liveWord = selectedIndexes.map((index) => liveLetters[index]).join("");
       if (normalizeWord(liveWord) !== word) throw new Error("Harfler yenilendi, tekrar seç.");
       const round = roomData.round ?? 0;
-      const submissionRef = doc(roomRef(), "submissions", `r${round}_${word}`);
+      const submissionRef = doc(submissionRoomRef, "submissions", `r${round}_${word}`);
       if ((await transaction.get(submissionRef)).exists()) throw new Error("Bu kelime daha önce bulundu.");
-      const profileSnapshot = await transaction.get(profileRef());
+      const profileSnapshot = await transaction.get(submissionProfileRef);
       const nextLetters = [...liveLetters];
       for (const index of selectedIndexes) {
         topUpBag(liveBag, nextLetters);
@@ -1261,8 +1328,8 @@ async function submitWord() {
       ensureMinimumVowels(nextLetters, liveBag, 3, selectedIndexes);
       refreshedLetters = nextLetters;
       refreshedBag = liveBag;
-      transaction.set(submissionRef, { word, ownerId: state.uid, points, round, createdAt: serverTimestamp() });
-      transaction.update(playerRef(), {
+      transaction.set(submissionRef, { word, ownerId: submissionUid, points, round, createdAt: serverTimestamp() });
+      transaction.update(submissionPlayerRef, {
         letters: nextLetters,
         letterBag: liveBag,
         boardRound: round,
@@ -1280,10 +1347,11 @@ async function submitWord() {
           profileUpdate.bestScoreWord = word;
         }
         if (Object.keys(profileUpdate).length) {
-          transaction.update(profileRef(), { ...profileUpdate, updatedAt: serverTimestamp() });
+          transaction.update(submissionProfileRef, { ...profileUpdate, updatedAt: serverTimestamp() });
         }
       }
     });
+    if (state.boardOperation !== operation) return;
     state.playerLetters = refreshedLetters ?? state.playerLetters;
     state.playerBag = refreshedBag ?? state.playerBag;
     state.combo += 1;
@@ -1300,17 +1368,21 @@ async function submitWord() {
     });
     track("word_accepted", { length: [...word].length, points });
   } catch (error) {
+    if (state.boardOperation !== operation) return;
     state.playerLetters = previousLetters;
     state.playerBag = previousBag;
-    state.boardVersion = Math.max(0, (state.boardVersion ?? 1) - 1);
+    state.boardVersion = previousVersion;
     state.selected = [];
     renderLetters();
     renderStock();
     invalidWord(ui.currentWord);
     toast(error.message, true);
   } finally {
-    state.submitting = false;
-    renderCurrentWord();
+    if (state.boardOperation === operation) {
+      state.submitting = false;
+      state.boardOperation = null;
+      renderCurrentWord();
+    }
   }
 }
 
@@ -1328,6 +1400,7 @@ function startTimer() {
         timerPulse(ui.timerText, remaining);
       }
     }
+    renderCurrentWord();
     refreshBlockedLetters();
     if (
       end && Date.now() >= end + ROUND_GRACE_MS &&
@@ -1544,6 +1617,7 @@ async function leaveRoom() {
   leaveListeners();
   persistRoomCode(null);
   Object.assign(state, {
+    boardOperation: null, submitting: false, shuffling: false,
     roomCode: null, room: null, players: [], selected: [], recentWords: [], combo: 0, ready: false,
     boardVersion: null, playerLetters: [], playerBag: null, boardInitializing: false,
     effects: [], blockedActive: false, rewarding: false, finishing: false,
@@ -1597,26 +1671,48 @@ function setBusy(value) {
   ui.joinRoomButton.disabled = value;
 }
 
+function setAuthBusy(value) {
+  authBusy = value;
+  ui.googleLoginButton.disabled = value;
+  ui.guestLoginButton.disabled = value;
+  ui.googleLoginButton.setAttribute("aria-busy", String(value));
+}
+
+function googleRecoveryOptions() {
+  return {
+    credentialFromError: (error) => GoogleAuthProvider.credentialFromError(error),
+    confirmSwitch: () => showConfirm("Bu Google hesabı zaten kayıtlı. Mevcut hesabına geçilsin mi? Misafir puanların bu hesapla birleştirilmez.", "HESABA GEÇ", "GOOGLE HESABINA GEÇ"),
+    signInExisting: (credential) => signInWithCredential(auth, credential),
+    canRedirect: location.hostname === firebaseConfig.authDomain,
+    redirect: () => auth.currentUser?.isAnonymous
+      ? linkWithRedirect(auth.currentUser, googleProvider)
+      : signInWithRedirect(auth, googleProvider)
+  };
+}
+
 async function googleLogin() {
+  if (authBusy) return;
+  setAuthBusy(true);
   try {
-    if (auth.currentUser?.isAnonymous) await linkWithPopup(auth.currentUser, googleProvider);
-    else await signInWithPopup(auth, googleProvider);
-  } catch (error) {
-    if (["auth/popup-blocked", "auth/cancelled-popup-request", "auth/operation-not-supported-in-this-environment"].includes(error.code)) {
-      if (auth.currentUser?.isAnonymous) await linkWithRedirect(auth.currentUser, googleProvider);
-      else await signInWithRedirect(auth, googleProvider);
-      return;
+    try {
+      if (auth.currentUser?.isAnonymous) await linkWithPopup(auth.currentUser, googleProvider);
+      else await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+      await recoverGoogleLogin(error, googleRecoveryOptions());
     }
-    const message = error.code === "auth/credential-already-in-use"
-      ? "Bu Google hesabının mevcut profili var. Önce çıkış yaparak Google ile gir."
-      : "Google girişi açılamadı.";
-    toast(message, true);
+  } catch (error) {
+    toast(authErrorMessage(error), true);
+  } finally {
+    setAuthBusy(false);
   }
 }
 
 async function guestLogin() {
+  if (authBusy) return;
+  setAuthBusy(true);
   try { await signInAnonymously(auth); }
-  catch (error) { toast("Misafir oturumu açılamadı.", true); }
+  catch (error) { toast(authErrorMessage(error), true); }
+  finally { setAuthBusy(false); }
 }
 
 async function logout() {
@@ -1686,9 +1782,15 @@ onAuthStateChanged(auth, async (user) => {
   ui.googleLoginButton.innerHTML = `<span>G</span> ${guest ? "GOOGLE'A BAĞLA" : "GOOGLE İLE GİRİŞ"}`;
   ui.guestLoginButton.classList.toggle("hidden", signedIn);
   ui.logoutButton.classList.toggle("hidden", !signedIn);
-  ui.createRoomButton.disabled = !signedIn;
-  ui.joinRoomButton.disabled = !signedIn;
-  ui.quickMatchButton.disabled = !signedIn;
+  ui.createRoomButton.disabled = true;
+  ui.joinRoomButton.disabled = true;
+  ui.quickMatchButton.disabled = true;
+  if (state.uid !== user?.uid) {
+    state.profileUnsubscriber?.();
+    state.friendsUnsubscriber?.();
+    state.inviteUnsubscriber?.();
+    state.profile = null;
+  }
   if (!signedIn) {
     state.uid = null;
     ui.coinBadge.classList.add("hidden");
@@ -1703,7 +1805,19 @@ onAuthStateChanged(auth, async (user) => {
     await dictionaryReady;
     await ensureProfile(user);
   }
-  catch (error) { toast(error.message, true); return; }
+  catch (error) {
+    setConnection("offline", "Hazırlanamadı");
+    ui.createRoomButton.disabled = true;
+    ui.joinRoomButton.disabled = true;
+    ui.quickMatchButton.disabled = true;
+    showScreen("homeScreen");
+    toast(`Oyun hazırlanamadı: ${error.message}`, true);
+    return;
+  }
+  if (auth.currentUser?.uid !== user.uid) return;
+  ui.createRoomButton.disabled = false;
+  ui.joinRoomButton.disabled = false;
+  ui.quickMatchButton.disabled = false;
   ui.playerName.value = user.displayName ?? state.profile?.displayName ?? localStorage.getItem("wra-player-name") ?? "";
   setConnection("online", guest ? "Misafir" : "Çevrimiçi");
   const savedRoomCode = localStorage.getItem("wra-room-code");
@@ -1712,4 +1826,7 @@ onAuthStateChanged(auth, async (user) => {
   track("app_ready");
 });
 
-getRedirectResult(auth).catch(() => toast("Google giriş yönlendirmesi tamamlanamadı.", true));
+getRedirectResult(auth)
+  .catch((error) => recoverGoogleLogin(error, { ...googleRecoveryOptions(), canRedirect: false }))
+  .catch((error) => toast(authErrorMessage(error), true));
+
