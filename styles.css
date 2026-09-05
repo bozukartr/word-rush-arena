@@ -400,3 +400,44 @@ input:focus { border-color: var(--floodlight); box-shadow: 0 0 0 4px color-mix(i
 .countdown-number { font-size: clamp(96px, 34vw, 168px); font-weight: 900; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; text-shadow: 0 0 60px color-mix(in srgb, var(--floodlight) 55%, transparent); animation: cd-pulse .5s cubic-bezier(.2, .8, .3, 1); }
 @keyframes cd-pulse { from { transform: scale(.5); opacity: 0; } }
 .letter-grid.countdown-hide .letter-tile { filter: blur(6px); opacity: .25; pointer-events: none; }
+
+
+
+/* Keep the board and primary action within thumb reach on compact phones. */
+.icon-btn { min-width: 44px; min-height: 44px; }
+.attack-button { min-height: 44px; }
+.letter-tile { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.letter-grid[aria-busy="true"] { cursor: progress; }
+.composer-tools .icon-btn:disabled { opacity: .35; }
+.current-word { white-space: nowrap; }
+body.in-game .app-shell { min-height: 100dvh; }
+body.in-game .game-screen { flex: 1; }
+@media (max-width: 559px) {
+  body.in-game .app-shell {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  .game-screen .letter-grid {
+    flex: 1 0 auto;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: clamp(54px, calc((100dvh - 360px - var(--safe-top) - var(--safe-bottom)) / 3), 88px);
+    align-content: center;
+    padding-block: 8px;
+  }
+  .game-screen .letter-tile { aspect-ratio: auto; }
+  .word-composer { flex-wrap: wrap; gap: 6px; }
+  .current-word { flex-basis: 100%; min-height: 48px; }
+  .composer-tools { width: 100%; justify-content: space-between; }
+  .composer-tools .icon-btn { width: 30%; border-radius: 12px; }
+  .status-line { gap: 8px; align-items: center; }
+  #gameStatus { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .status-meta { flex-shrink: 0; }
+  .btn--submit { min-height: 52px; }
+}
+@media (max-height: 700px) and (max-width: 559px) {
+  body.in-game .app-shell { padding-top: calc(4px + var(--safe-top)); padding-bottom: calc(6px + var(--safe-bottom)); }
+  .game-screen .hud-card { padding-block: 4px; }
+  .game-screen .letter-grid { padding-block: 4px; }
+  .game-screen .word-composer { margin-top: 6px; }
+  .game-screen .recent-words { min-height: 0; }
+}
