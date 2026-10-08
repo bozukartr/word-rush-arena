@@ -12,7 +12,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --check app.js && node --test tests/auth-flow.test.mjs
-      - run: npm install --no-save --package-lock=false playwright@1.62.1
+      - run: for file in app.js game-core.js words.js effects.js auth-flow.js sw.js scripts/build-web.mjs; do node --check "$file"; done
+      - run: node --test tests/*.test.mjs
+      - run: npm install --no-save --package-lock=false --ignore-scripts playwright@1.62.1
       - run: npx playwright install --with-deps chromium
       - run: node tests/mobile.mjs
+      - run: node scripts/build-web.mjs

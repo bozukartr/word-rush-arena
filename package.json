@@ -1,0 +1,30 @@
+{
+  "name": "word-rush-arena",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gerçek zamanlı Türkçe kelime düellosu — web, PWA ve Capacitor ile Android/iOS.",
+  "scripts": {
+    "test": "node --check app.js && node --test tests/*.test.mjs",
+    "test:mobile": "node tests/mobile.mjs",
+    "serve": "npx --yes http-server -c-1 -p 5000 .",
+    "build:web": "node scripts/build-web.mjs",
+    "cap:add:android": "npm run build:web && npx cap add android",
+    "cap:add:ios": "npm run build:web && npx cap add ios",
+    "cap:sync": "npm run build:web && npx cap sync",
+    "android": "npm run cap:sync && npx cap open android",
+    "ios": "npm run cap:sync && npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3"
+  }
+}
