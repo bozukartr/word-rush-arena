@@ -1,0 +1,28 @@
+{
+  "appId": "com.wordrusharena.app",
+  "appName": "Word Rush Arena",
+  "webDir": "www",
+  "backgroundColor": "#0A0F12",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "never"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#0A0F12",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK",
+      "backgroundColor": "#00000000"
+    }
+  }
+}

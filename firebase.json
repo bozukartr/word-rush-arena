@@ -5,12 +5,19 @@
       "firebase.json",
       "firestore.rules",
       "README.md",
+      "NOTICE.md",
       ".firebaserc",
+      ".gitignore",
       ".git/**",
       ".github/**",
       "tests/**",
+      "scripts/**",
       "node_modules/**",
-      "package*.json"
+      "www/**",
+      "android/**",
+      "ios/**",
+      "package*.json",
+      "capacitor.config.json"
     ],
     "cleanUrls": true,
     "trailingSlash": false,
@@ -21,6 +28,33 @@
           {
             "key": "Cache-Control",
             "value": "public,max-age=300,must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/tr_words.txt",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public,max-age=86400"
+          }
+        ]
+      },
+      {
+        "source": "/icons/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public,max-age=604800"
+          }
+        ]
+      },
+      {
+        "source": "/sw.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache,no-store,must-revalidate"
           }
         ]
       },
